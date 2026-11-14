@@ -49,6 +49,15 @@ def test_older_event_names_are_read(tmp_path):
     assert home_with(tmp_path / "b", ["turn_started", "turn_complete"]).working() == ()
 
 
+def test_lock_files_that_are_not_threads_are_skipped(tmp_path):
+    w = home_with(tmp_path, ["task_started"])
+    (w.home / "thread-writer-locks" / ".coordination.lock").touch()
+    looked_up, find = [], w._rollout
+    w._rollout = lambda thread: looked_up.append(thread) or find(thread)
+    assert len(w.working()) == 1
+    assert looked_up == [THREAD]
+
+
 def test_a_thread_whose_process_died_is_not_working(tmp_path):
     assert home_with(tmp_path, ["task_started"], locked=False).working() == ()
 

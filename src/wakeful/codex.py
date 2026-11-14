@@ -109,6 +109,8 @@ class CodexWatcher:
         holders = flock_holders(self._locks.read_text())
         found = []
         for lock in sorted(lock_files):
+            if lock.name.startswith("."):
+                continue  # .coordination.lock and the like are not threads
             try:
                 st = lock.stat()
             except OSError:

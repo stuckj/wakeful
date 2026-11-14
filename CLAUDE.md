@@ -41,10 +41,12 @@ None of these is a documented interface. Each watcher module's docstring documen
   or `waiting`; it reads `shell` after a turn ends while a background shell still runs, and
   `busy` while an in-process subagent runs. `procStart` is field 22 of `/proc/<pid>/stat`;
   `pidDomain` is `linux:<machine-id>:pid:[<pid namespace>]`.
-- **Codex**, read from source (openai/codex `rust-v0.169.0`), not yet seen running.
-  `codex-rs/rollout/src/policy.rs` always persists `task_started`, `task_complete` and
-  `turn_aborted`; `codex-rs/rollout/src/writer_lock.rs` flocks
-  `thread-writer-locks/<thread>.lock` while a thread is open. Approval waits are not persisted.
+- **Codex**, checked by running codex-cli 0.169.0 on Linux, and in its source
+  (`codex-rs/rollout/src/policy.rs`, `writer_lock.rs`). Every turn writes `task_started` then
+  `task_complete` (or `turn_aborted`) to its rollout; the first line is `session_meta` with the
+  cwd. `thread-writer-locks/<thread>.lock` is flock-held, by the app-server daemon when one runs,
+  for as long as the thread is open, not only during a turn. That directory also holds
+  `.coordination.lock`, which is not a thread. Approval waits are not persisted.
 - **opencode**, schema checked against an installed 1.19.3; behaviour read from source at
   `v1.19.3` and `v2.3.0`. 1.x writes an assistant message without `time.completed` when a step
   starts (`session/processor.ts`); streaming writes nothing. 2.x has `session_v2.time_busy` and

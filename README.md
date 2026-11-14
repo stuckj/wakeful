@@ -13,6 +13,7 @@ Plasma's own "Manually block sleep and screen locking" switch has no time limit 
 - **Nothing left behind** — the block ends when the time runs out, when you turn it off, and when Wakeful exits or crashes.
 - **Visible where you expect it** — the icon shows whether a block is active and which mode; the tooltip shows the time left; the battery applet lists Wakeful among the applications blocking sleep, with the reason *Keeping awake: 47 min left*.
 - **Optionally ignore closing the lid** (off by default) — see [Closing the lid](#closing-the-lid).
+- **Optionally keep awake while Claude Code is working** (off by default), with the working sessions listed in the menu — see [Claude Code](#claude-code).
 - **A command line** to drive the running tray, for scripts and keyboard shortcuts.
 - A notification when time runs out (can be turned off), and *Start at login*.
 
@@ -90,7 +91,7 @@ wakeful status
 wakeful stop
 ```
 
-These talk to the running tray, so it must be running first.
+These talk to the running tray, so it must be running first. `wakeful status` also lists the Claude Code sessions keeping the computer awake, if any.
 
 ## How it works
 
@@ -124,6 +125,16 @@ Because that is a saved setting rather than a block that dies with the app, Wake
 - If both are gone (a power cut, or a reboot during the block), the next start of Wakeful puts them back. Turn on *Start at login* if you use this option.
 
 While it is on, a laptop closed and put in a bag stays awake until the block ends.
+
+## Claude Code
+
+With *Keep awake while Claude is working* on (it is off, and only offered when `~/.claude` or `$CLAUDE_CONFIG_DIR` exists), Wakeful blocks idle sleep while any [Claude Code](https://claude.com/claude-code) session of yours on this computer is working, and lets it sleep again once none is. A session counts while it is running a turn, including any subagents, and while a shell it started is still running after the turn has ended, even one that is only waiting. A session sitting at its prompt, or waiting for you to answer a question or approve a command, does not.
+
+While Claude is the reason, the icon shows the block, the menu has a *Claude is working (N)* submenu listing each session by name and whether it is working or running a shell, and the battery applet shows *Claude is working:* followed by the names. A block you start yourself runs alongside, in its own mode; when it ends, the computer stays awake for as long as Claude is still working. The screen still dims, turns off and locks as usual, and the lid option applies only to blocks you start.
+
+Wakeful finds out by reading the files Claude Code keeps for each running process in `~/.claude/sessions`, every five seconds. A file left behind by a process that has gone, or whose process number has been reused, is ignored. These files are Claude Code's own and not a documented interface, so a future Claude Code release could change them and the option would stop seeing sessions until Wakeful catches up.
+
+A background shell that never ends, such as a forgotten `tail -f`, keeps the computer awake until it is stopped. The submenu shows which session has it.
 
 ## Documentation
 

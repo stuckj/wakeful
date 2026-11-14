@@ -53,7 +53,8 @@ Add time to the running block.
 End the running block.
 .TP
 .B status
-Print what is being kept awake and for how long.
+Print what is being kept awake and for how long, and which Claude Code
+sessions are working.
 .PP
 \fIDURATION\fR is minutes as a bare number (\fB90\fR), or hours, minutes and
 seconds such as \fB1h30m\fR, \fB45m\fR or \fB20s\fR. \fBforever\fR means no end.
@@ -80,10 +81,19 @@ example after a reboot), the next start of
 .B wakeful
 restores them. A value changed in System Settings during the block is left as
 it is.
+.SH CLAUDE CODE
+With the tray's \fBKeep awake while Claude is working\fR option on, idle sleep
+is blocked while any Claude Code session of the same user on this computer is
+running a turn or still has a shell running. Sessions at their prompt, or
+waiting for an answer, do not count. The working sessions are listed in the
+tray menu and by \fBwakeful status\fR. They are read from the files Claude Code
+keeps in \fI$CLAUDE_CONFIG_DIR/sessions\fR (default \fI~/.claude/sessions\fR),
+every five seconds; a file whose process has gone is ignored. The option is
+offered only when that configuration directory exists.
 .SH FILES
 .TP
 .I ~/.config/wakeful/wakeful.conf
-Preferences: mode, last length, lid option, notifications.
+Preferences: mode, last length, lid option, Claude Code option, notifications.
 .TP
 .I ~/.config/autostart/wakeful.desktop
 Present when "Start at login" is on.

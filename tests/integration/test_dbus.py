@@ -97,6 +97,7 @@ def env(tmp_path):
     e.update(
         XDG_CONFIG_HOME=str(tmp_path / "config"),
         XDG_STATE_HOME=str(tmp_path / "state"),
+        CLAUDE_CONFIG_DIR=str(tmp_path / "claude"),
         QT_QPA_PLATFORM="offscreen",
     )
     return e
@@ -420,3 +421,93 @@ def test_lid_restored_at_startup_from_a_leftover_journal(stub, env):
         assert [lid_value(env, p) for p in ("AC", "Battery", "LowBattery")] == ["1", "unset", "2"]
     finally:
         a.stop()
+
+
+# -- following Claude Code --------------------------------------------------
+
+
+@pytest.fixture
+def claude_session(env):
+    """A live process standing in for Claude Code, and a writer for its session file."""
+    proc = subprocess.Popen(["sleep", "300"])
+    sessions = Path(env["CLAUDE_CONFIG_DIR"]) / "sessions"
+    sessions.mkdir(parents=True)
+    stat = Path(f"/proc/{proc.pid}/stat").read_text()
+    started = stat[stat.rfind(")") + 2 :].split()[19]
+
+    def write(status: str) -> None:
+        data = {"pid": proc.pid, "procStart": started, "status": status, "name": "fix the tests"}
+        tmp = sessions / f"{proc.pid}.json.tmp"
+        tmp.write_text(json.dumps(data))
+        tmp.replace(sessions / f"{proc.pid}.json")
+
+    yield proc, write
+    proc.kill()
+    proc.wait()
+
+
+def reasons(stub) -> list[str]:
+    return sorted(h["why"] for h in stub.held())
+
+
+def test_claude_option_needs_the_config_directory(stub, app):
+    app("--no-tray")
+    result = call_app(stub, "SetWatchClaude", "b", True)
+    assert not result["ok"]
+    assert "Claude Code was not found" in result["error"]
+
+
+def test_working_claude_session_keeps_awake_until_idle_or_gone(stub, app, claude_session):
+    proc, write = claude_session
+    write("shell")
+    a = app("--no-tray")
+    assert stub.held() == []  # the option is off by default
+
+    status = call_app(stub, "SetWatchClaude", "b", True)["status"]
+    assert [s["name"] for s in status["claude_sessions"]] == ["fix the tests"]
+    [held] = stub.held()
+    assert (held["kind"], held["why"]) == ("pm", "Claude is working: fix the tests")
+    out = a.cli("status").stdout
+    assert "Keeping awake while Claude is working." in out
+    assert "fix the tests (running a shell)" in out
+
+    write("idle")
+    wait_for(lambda: stub.held() == [], what="the idle session to be let go")
+    assert "Not keeping awake" in a.cli("status").stdout
+
+    write("busy")
+    wait_for(lambda: stub.held(), what="the busy session to be followed")
+    proc.kill()
+    proc.wait()
+    wait_for(lambda: stub.held() == [], what="the dead session to be let go")
+
+
+def test_block_ending_hands_over_to_claude(stub, app, claude_session):
+    _, write = claude_session
+    write("busy")
+    a = app("--no-tray")
+    assert call_app(stub, "SetWatchClaude", "b", True)["ok"]
+    assert a.cli("start", "--screen", "1h").returncode == 0
+    wait_for(
+        lambda: reasons(stub) == ["Keeping awake: 1 h left"] * 2,
+        what="Claude's inhibition to be retired in favour of the block's",
+    )
+
+    assert a.cli("stop").returncode == 0
+    # Claude's inhibition is taken before the block's is retired.
+    assert "Claude is working: fix the tests" in reasons(stub)
+    wait_for(
+        lambda: reasons(stub) == ["Claude is working: fix the tests"],
+        what="the block's inhibitions to be retired",
+    )
+
+
+def test_tray_follows_claude_from_its_saved_setting(stub, app, env, claude_session):
+    _, write = claude_session
+    write("busy")
+    conf = Path(env["XDG_CONFIG_HOME"]) / "wakeful" / "wakeful.conf"
+    conf.parent.mkdir(parents=True)
+    conf.write_text("[General]\nwatch_claude=true\n")
+    a = app()
+    wait_for(lambda: stub.held(), what="the tray to follow the session")
+    assert "fix the tests (working)" in a.cli("status").stdout

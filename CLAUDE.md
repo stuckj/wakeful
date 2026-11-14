@@ -32,6 +32,16 @@ Checked against the Plasma/6.6 sources of powerdevil and kscreenlocker:
 
 The stub in `tests/integration/stub_services.py` mirrors these; keep it in step if they change.
 
+## Facts about Claude Code that the code relies on
+
+Checked against Claude Code 2.1.302 on Linux; `src/wakeful/claude.py` documents the fields it reads.
+
+- `~/.claude/sessions/<pid>.json` (under `$CLAUDE_CONFIG_DIR` when set) exists per running
+  process. `status` is `busy`, `shell`, `idle` or `waiting`; it reads `shell` after a turn ends
+  while a background shell still runs, and `busy` while an in-process subagent runs.
+- `procStart` is field 22 of `/proc/<pid>/stat`; `pidDomain` is
+  `linux:<machine-id>:pid:[<pid namespace>]`.
+
 ## Surfaces that must stay in sync
 
 A user-visible change to the commands or options touches `app.py`, `docs/wakeful.1` and the

@@ -10,6 +10,7 @@ import sys
 
 from . import __version__, control
 from .block import Mode, describe_remaining, parse_duration
+from .claude import WORKING
 
 log = logging.getLogger("wakeful")
 
@@ -82,13 +83,21 @@ def run_command(args: argparse.Namespace) -> int:
         print(f"wakeful: {result.get('error')}", file=sys.stderr)
         return 1
     status = result["status"]
+    sessions = status.get("claude_sessions", [])
     if status["active"]:
         mode = Mode(status["mode"])
         print(f"Keeping awake ({mode.label.lower()}): {describe_remaining(status['remaining'])}")
         if status["lid_ignored"]:
             print("Closing the lid will not sleep.")
+    elif sessions:
+        print("Keeping awake while Claude is working.")
     else:
         print("Not keeping awake.")
+    if sessions:
+        print("Claude sessions working:")
+        for s in sessions:
+            doing = WORKING.get(s["status"], s["status"])
+            print(f"  {s['name']} ({doing}) in {s['cwd']}")
     return 0
 
 
@@ -100,6 +109,7 @@ def run_app(no_tray: bool) -> int:
     from PyQt6.QtCore import QCoreApplication, QTimer
     from PyQt6.QtDBus import QDBusConnection
 
+    from .claude import SessionWatcher, config_dir
     from .controller import Controller
     from .inhibit import DBusInhibitor
     from .lid import KConfigTools, LidError, LidGuard
@@ -127,7 +137,11 @@ def run_app(no_tray: bool) -> int:
         log.info("kreadconfig6/kwriteconfig6 not found; the lid option is unavailable")
     lid = WatchedLidGuard(guard) if guard is not None else None
 
-    controller = Controller(DBusInhibitor(bus), lid)
+    claude = SessionWatcher() if config_dir().is_dir() else None
+    if claude is None:
+        log.info("%s not found; the Claude Code option is unavailable", config_dir())
+
+    controller = Controller(DBusInhibitor(bus), lid, claude=claude)
     holder = control.serve(bus, controller)
     if holder is None:
         print("wakeful is already running.", file=sys.stderr)
@@ -150,7 +164,14 @@ def run_app(no_tray: bool) -> int:
         settings = Settings()
         if lid is not None:
             controller.ignore_lid = settings.ignore_lid
-        tray = Tray(controller, settings, lid_available=lid is not None)
+        if claude is not None:
+            controller.watch_claude = settings.watch_claude
+        tray = Tray(
+            controller,
+            settings,
+            lid_available=lid is not None,
+            claude_available=claude is not None,
+        )
 
     timer = QTimer()
     timer.setSingleShot(True)

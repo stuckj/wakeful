@@ -31,6 +31,8 @@ from .agents import CLOCK_SLACK, AgentSession, started_at
 STARTED = {"task_started", "turn_started"}
 ENDED = {"task_complete", "turn_complete", "turn_aborted"}
 TAIL_CHUNK = 64 * 1024
+RESEARCH_AFTER = 60
+"""Seconds before searching every day's folder again for a thread's missing rollout."""
 META_MAX = 4 * 1024 * 1024
 """The longest first line (session_meta, with its instructions) read for a cwd."""
 
@@ -153,6 +155,8 @@ class CodexWatcher:
         self._confirmed: set[tuple[int, int]] = set()
         """(inode, pid) pairs already seen holding a lock file open."""
         self._scans: dict[Path, tuple[int, int, TurnEvent | None]] = {}
+        self._missed: dict[str, float] = {}
+        """When a full search last found no rollout for a thread, by time.monotonic()."""
         """Per rollout: its inode, how far it has been read, and the last turn event."""
 
     def available(self) -> bool:
@@ -235,11 +239,19 @@ class CodexWatcher:
         if cached is not None:
             folders.add(cached.parent)
         matches = [p for folder in folders for p in folder.glob(pattern)]
-        if cached is None or not matches:
+        # A thread open before its rollout is written would otherwise walk every
+        # day's folder on every tick.
+        recently_missed = (
+            time.monotonic() - self._missed.get(thread, float("-inf")) < RESEARCH_AFTER
+        )
+        if (cached is None or not matches) and not recently_missed:
             matches = list(sessions.glob(f"*/*/*/{pattern}"))
+            if not matches:
+                self._missed[thread] = time.monotonic()
         newest = max(matches, key=_mtime, default=None)
         if newest is not None:
             self._rollouts[thread] = newest
+            self._missed.pop(thread, None)
         return newest
 
     def _cwd(self, rollout: Path) -> str:

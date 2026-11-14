@@ -369,6 +369,15 @@ def test_nothing_is_read_while_off(agents_env):
     assert claude.reads == 0
 
 
+def test_a_watcher_that_keeps_failing_is_logged_once(agents_env, caplog):
+    c, _, _, _, claude, _, _ = agents_env
+    claude.working = lambda: 1 / 0
+    c.set_agents_enabled(True)
+    for _ in range(3):
+        c.tick()
+    assert sum(r.levelname == "ERROR" for r in caplog.records) == 1
+
+
 def test_an_agent_that_is_not_installed_is_not_read(agents_env):
     c, _, _, _, _, codex, _ = agents_env
     c.set_watched("codex", True)

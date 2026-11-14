@@ -44,7 +44,11 @@ def add_step(conn, id_, role, completed, age):
 
 
 def fake_proc(
-    tmp_path, cwd="/work/app", started_ago=60, exe="/usr/lib/opencode-ai/bin/opencode.exe"
+    tmp_path,
+    cwd="/work/app",
+    started_ago=60,
+    exe="/usr/lib/opencode-ai/bin/opencode.exe",
+    args=(),
 ):
     """A /proc with one process started started_ago seconds before NOW."""
     proc = tmp_path / "proc"
@@ -54,6 +58,7 @@ def fake_proc(
     entry.mkdir()
     os.symlink(exe, entry / "exe")
     os.symlink(cwd, entry / "cwd")
+    (entry / "cmdline").write_bytes(b"\0".join([b"opencode", *(a.encode() for a in args)]) + b"\0")
     start_ticks = int((NOW - started_ago - BOOT) * TICKS)
     fields = ["S"] + ["0"] * 18 + [str(start_ticks)] + ["0"] * 5
     (entry / "stat").write_text(f"4242 (opencode.exe) {' '.join(fields)}\n")
@@ -199,6 +204,31 @@ def test_a_migrated_database_is_read_for_both_versions(tmp_path):
     add_v2_session(home / "opencode.db", "v2 run", 5)
     w = OpencodeWatcher(home, fake_proc(tmp_path), now=Clock())
     assert sorted(s.name for s in w.working()) == ["fix the tests", "v2 run"]
+
+
+def test_the_2x_background_service_runs_sessions_of_any_directory(tmp_path):
+    home = tmp_path / "data"
+    home.mkdir()
+    add_v2_session(home / "opencode.db", "run in the background", 5)
+    proc = fake_proc(tmp_path, cwd="/home/user", args=("serve", "--service"))
+    w = OpencodeWatcher(home, proc, now=Clock())
+    assert [s.name for s in w.working()] == ["run in the background"]
+
+
+def test_the_service_does_not_revive_a_run_older_than_itself(tmp_path):
+    home = tmp_path / "data"
+    home.mkdir()
+    add_v2_session(home / "opencode.db", "left by a crash", 3600)
+    proc = fake_proc(tmp_path, cwd="/home/user", started_ago=60, args=("serve", "--service"))
+    assert OpencodeWatcher(home, proc, now=Clock()).working() == ()
+
+
+def test_another_opencode_outside_the_directory_still_does_not_count(tmp_path):
+    home = tmp_path / "data"
+    home.mkdir()
+    add_v2_session(home / "opencode.db", "elsewhere", 5)
+    proc = fake_proc(tmp_path, cwd="/home/user", args=("serve", "--port", "4096"))
+    assert OpencodeWatcher(home, proc, now=Clock()).working() == ()
 
 
 def test_a_channel_database_is_read(tmp_path):

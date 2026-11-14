@@ -13,13 +13,14 @@ interface:
        ends; the session is working while time_busy is the later.
 
 The database records no process, and a crash leaves an unfinished step behind
-for good. So a step counts only while an opencode process runs in its session's
-directory (or below it) and was started before the step: one left by an earlier
-process is older than every process running now. A 1.x step whose session has
-written nothing for SILENT_FOR is also taken to be left behind, which covers a
-process killed while an older one runs in the same directory. Nothing is read
-while no opencode process runs. The database is opened read-only, and only the
-session, message and part tables are read; the same file holds credentials.
+for good. So a step counts only while an opencode process that started before
+it runs in its session's directory (or below it), or as 2.x's background
+service: one left by an earlier process is older than every process running
+now. A 1.x step whose session has written nothing for SILENT_FOR is also taken
+to be left behind, which covers a process killed while an older one runs in the
+same directory. Nothing is read while no opencode process runs. The database is
+opened read-only, and only the session, message, part and session_v2 tables are
+read; the same file holds credentials.
 """
 
 from __future__ import annotations
@@ -66,6 +67,9 @@ class Process:
     cwd: str
     started: float
     """Seconds since the epoch."""
+    service: bool = False
+    """2.x's background service (`opencode serve --service`), which runs the sessions
+    of every directory and keeps the cwd of whichever client started it."""
 
 
 def data_dir() -> Path:
@@ -87,6 +91,7 @@ def opencode_processes(proc: Path = Path("/proc")) -> list[Process]:
             if Path(exe).name not in BINARIES:
                 continue
             cwd = os.readlink(entry / "cwd")
+            args = (entry / "cmdline").read_bytes().split(b"\0")[1:]
         except OSError:
             continue
         start = proc_start(int(entry.name), proc)
@@ -94,7 +99,8 @@ def opencode_processes(proc: Path = Path("/proc")) -> list[Process]:
             continue
         if booted is None:
             booted = boot_time(proc)
-        found.append(Process(int(entry.name), cwd, booted + start / ticks))
+        service = b"serve" in args and b"--service" in args
+        found.append(Process(int(entry.name), cwd, booted + start / ticks, service))
     return found
 
 
@@ -164,7 +170,11 @@ class OpencodeWatcher:
             if last_write is not None and self._now() - last_write >= SILENT_FOR:
                 continue
             owner = next(
-                (p for p in procs if _within(directory, p.cwd) and p.started - CLOCK_SLACK <= step),
+                (
+                    p
+                    for p in procs
+                    if (p.service or _within(directory, p.cwd)) and p.started - CLOCK_SLACK <= step
+                ),
                 None,
             )
             if owner is not None:

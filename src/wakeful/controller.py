@@ -110,6 +110,8 @@ class Controller:
         self._seen_at: float | None = None
         self._held = False
         """Whether the last successful _apply() left the inhibition held."""
+        self._failing: set[str] = set()
+        """Agents whose watcher raised on its last read."""
         self.on_changed: Callable[[Status], None] = lambda status: None
         self.on_ended: Callable[[Block, str], None] = lambda block, why: None
         """Called with the block and 'expired' or 'stopped'."""
@@ -258,7 +260,14 @@ class Controller:
             try:
                 found.extend(watcher.working())
             except Exception:
-                log.exception("could not read the %s sessions", watcher.label)
+                # Once with the traceback; again only after it has worked.
+                if key in self._failing:
+                    log.debug("could not read the %s sessions", watcher.label, exc_info=True)
+                else:
+                    log.exception("could not read the %s sessions", watcher.label)
+                    self._failing.add(key)
+            else:
+                self._failing.discard(key)
         self._sessions = tuple(found)
         if self._sessions and self._watching():
             self._seen_at = self._now()

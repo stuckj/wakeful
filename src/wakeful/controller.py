@@ -107,7 +107,7 @@ class Controller:
         self._claude: tuple[ClaudeSession, ...] = ()
         self._claude_seen_at: float | None = None
         self._held = False
-        """What the last _apply() decided, so tick() can see holding change."""
+        """Whether the last successful _apply() left the inhibition held."""
         self.on_changed: Callable[[Status], None] = lambda status: None
         self.on_ended: Callable[[Block, str], None] = lambda block, why: None
         """Called with the block and 'expired' or 'stopped'."""
@@ -119,7 +119,7 @@ class Controller:
         if block is None:
             return Status(False, None, None, "Not keeping awake", False, self._ignore_lid)
         remaining = block.remaining(self._now())
-        held = self._holding()
+        held = self._held
         if not block.while_claude:
             text = reason_text(remaining)
         else:
@@ -177,7 +177,6 @@ class Controller:
             self._sync_lid()
             self._changed()
             raise
-        self._sync_lid()
         self._changed()
 
     def extend(self, duration: float) -> None:
@@ -212,21 +211,18 @@ class Controller:
         if block.expired(now):
             self._end("expired")
             return
-        was_holding = self._held
         # Retried on every tick: hold() also re-takes an inhibition that was
         # lost, for example to a PowerDevil restart.
         try:
             self._apply()
         except Exception as e:
             log.warning("could not refresh the inhibition: %s", e)
-        if self._held != was_holding:
-            self._sync_lid()
         self._changed()
 
     def shutdown(self) -> None:
         """Release everything before exit. The block is not reported as ended."""
         self._session.cancel()
-        self._claude = ()
+        self._claude, self._held = (), False
         self._inhibitor.release()
         self._sync_lid()
 
@@ -242,16 +238,20 @@ class Controller:
         return seen is not None and self._now() - seen < CLAUDE_GRACE
 
     def _apply(self) -> None:
-        """Hold the inhibition the block asks for right now, or release it."""
+        """Hold the inhibition the block asks for right now, or release it, and
+        move the lid with it when that changes."""
         block = self._session.block
         assert block is not None
-        self._held = self._holding()
-        if not self._held:
+        holding = self._holding()
+        if not holding:
             self._inhibitor.release()
         elif block.while_claude:
             self._inhibitor.hold(block.mode, claude_reason_text(self._claude))
         else:
             self._inhibitor.hold(block.mode, reason_text(block.remaining(self._now())))
+        if holding != self._held:
+            self._held = holding
+            self._sync_lid()
 
     def _read_claude(self) -> tuple[ClaudeSession, ...]:
         if self._claude_watcher is None:
@@ -264,7 +264,7 @@ class Controller:
 
     def _end(self, why: str) -> None:
         ended = self._session.cancel()
-        self._claude, self._claude_seen_at = (), None
+        self._claude, self._claude_seen_at, self._held = (), None, False
         self._inhibitor.release()
         self._sync_lid()
         if ended is not None:
@@ -274,7 +274,7 @@ class Controller:
     def _sync_lid(self) -> None:
         if self._lid is None:
             return
-        want = self._ignore_lid and self._holding()
+        want = self._ignore_lid and self._held
         if want == self._lid_engaged:
             return
         try:

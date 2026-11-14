@@ -443,6 +443,42 @@ def test_grace_does_not_carry_over_from_a_stopped_block(claude_env):
     assert inhibitor.held is None
 
 
+@pytest.mark.parametrize("change", ["set_mode", "extend"])
+def test_lid_follows_a_release_made_by_a_mode_change_or_extend(claude_env, change):
+    c, inhibitor, lid, clock, claude, _ = claude_env
+    c.ignore_lid = True
+    claude.sessions = [session("a")]
+    c.start(None, Mode.SLEEP, while_claude=True)
+    claude.sessions = []
+    clock.t += CLAUDE_GRACE - 3
+    c.tick()
+    assert lid.engaged
+    clock.t += 4
+    if change == "set_mode":
+        c.set_mode(Mode.SCREEN)
+    else:
+        c.extend(1800)
+    for _ in range(3):
+        clock.t += 5
+        c.tick()
+    assert inhibitor.held is None
+    assert not lid.engaged
+
+
+def test_failed_hold_is_not_reported_as_held(claude_env):
+    c, inhibitor, lid, _, claude, _ = claude_env
+    c.ignore_lid = True
+    c.start(None, Mode.SLEEP, while_claude=True)
+    claude.sessions = [session("a")]
+    inhibitor.fail = True
+    c.tick()
+    assert not c.status().held
+    assert not lid.engaged
+    inhibitor.fail = False
+    c.tick()
+    assert c.status().held and lid.engaged
+
+
 def test_a_failing_lid_change_is_not_retried_on_every_tick(claude_env):
     c, _, lid, clock, _, _ = claude_env
     c.ignore_lid = True

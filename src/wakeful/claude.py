@@ -22,51 +22,18 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
+
+from .agents import AgentSession, proc_start
 
 log = logging.getLogger(__name__)
 
 WORKING = {"busy": "working", "shell": "running a shell"}
-LABEL_MAX = 60
-
-
-@dataclass(frozen=True)
-class ClaudeSession:
-    pid: int
-    name: str
-    status: str
-    cwd: str
-
-    @property
-    def doing(self) -> str:
-        return WORKING.get(self.status, self.status)
-
-    @property
-    def label(self) -> str:
-        """The name, shortened for display: an untitled session is named after its prompt."""
-        if len(self.name) <= LABEL_MAX:
-            return self.name
-        return self.name[: LABEL_MAX - 1].rstrip() + "…"
 
 
 def config_dir() -> Path:
     env = os.environ.get("CLAUDE_CONFIG_DIR")
     return Path(env) if env else Path.home() / ".claude"
-
-
-def proc_start(pid: int) -> int | None:
-    """The start time of pid in clock ticks since boot, or None if it is gone."""
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
-    except OSError:
-        return None
-    # The command name in field 2 may contain spaces and parentheses.
-    fields = stat[stat.rfind(")") + 2 :].split()
-    try:
-        return int(fields[19])
-    except (IndexError, ValueError):
-        return None
 
 
 def pid_domain() -> str | None:
@@ -78,8 +45,11 @@ def pid_domain() -> str | None:
     return f"linux:{machine}:{namespace}"
 
 
-class SessionWatcher:
+class ClaudeWatcher:
     """Reads the sessions directory and reports the sessions that are working."""
+
+    key = "claude"
+    label = "Claude Code"
 
     def __init__(
         self,
@@ -95,7 +65,7 @@ class SessionWatcher:
         """Claude Code's configuration directory exists."""
         return self.sessions_dir.parent.is_dir()
 
-    def working(self) -> tuple[ClaudeSession, ...]:
+    def working(self) -> tuple[AgentSession, ...]:
         try:
             files = sorted(self.sessions_dir.glob("*.json"))
         except OSError:
@@ -107,7 +77,7 @@ class SessionWatcher:
                 found.append(session)
         return tuple(found)
 
-    def _read(self, path: Path) -> ClaudeSession | None:
+    def _read(self, path: Path) -> AgentSession | None:
         try:
             data = json.loads(path.read_text())
         except (OSError, ValueError):
@@ -128,4 +98,5 @@ class SessionWatcher:
         if expected is not None and str(expected) != str(started):
             return None
         name = data.get("name") or str(data.get("sessionId", ""))[:8] or str(pid)
-        return ClaudeSession(pid, str(name), data["status"], str(data.get("cwd", "")))
+        doing = WORKING[str(data["status"])]
+        return AgentSession(self.label, pid, str(name), doing, str(data.get("cwd", "")))

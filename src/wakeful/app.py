@@ -10,7 +10,6 @@ import sys
 
 from . import __version__, control
 from .block import Mode, describe_remaining, parse_duration
-from .claude import WORKING
 
 log = logging.getLogger("wakeful")
 
@@ -33,12 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", metavar="COMMAND")
 
     start = sub.add_parser("start", help="keep awake for DURATION (default: until stopped)")
-    start.add_argument(
-        "duration",
-        nargs="?",
-        default="forever",
-        help="e.g. 90, 45m, 1h30m, or 'claude' to last while a Claude Code session is working",
-    )
+    start.add_argument("duration", nargs="?", default="forever", help="e.g. 90, 45m, 1h30m")
     start.add_argument(
         "--screen", action="store_true", help="keep the screen on too (default: it may turn off)"
     )
@@ -46,7 +40,24 @@ def build_parser() -> argparse.ArgumentParser:
     extend.add_argument("duration")
     sub.add_parser("stop", help="end the running block")
     sub.add_parser("status", help="show what is being kept awake")
+    agents = sub.add_parser(
+        "agents",
+        help="keep awake while coding agents work: 'on', 'off', or AGENT on|off",
+        description="With 'on' or 'off', turn agentic checks on or off. With an agent "
+        "(claude, codex, opencode) and 'on' or 'off', tick or untick that agent. "
+        "With nothing, show the state.",
+    )
+    agents.add_argument("words", nargs="*", metavar="[AGENT] on|off")
     return p
+
+
+def parse_switch(word: str) -> bool:
+    w = word.lower()
+    if w in ("on", "yes", "true", "1"):
+        return True
+    if w in ("off", "no", "false", "0"):
+        return False
+    raise ValueError(f"expected 'on' or 'off', not {word!r}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -66,12 +77,17 @@ def run_command(args: argparse.Namespace) -> int:
     _app = QCoreApplication(sys.argv[:1])
     try:
         if args.command == "start":
+            seconds = parse_duration(args.duration)
             mode = Mode.SCREEN if args.screen else Mode.SLEEP
-            if args.duration.strip().lower() == "claude":
-                result = control.call("StartWhileClaude", mode.value)
-            else:
-                seconds = parse_duration(args.duration)
-                result = control.call("Start", int(seconds or 0), mode.value)
+            result = control.call("Start", int(seconds or 0), mode.value)
+        elif args.command == "agents" and len(args.words) == 1:
+            result = control.call("SetAgentsEnabled", parse_switch(args.words[0]))
+        elif args.command == "agents" and len(args.words) == 2:
+            result = control.call(
+                "SetAgentWatched", args.words[0].lower(), parse_switch(args.words[1])
+            )
+        elif args.command == "agents" and args.words:
+            raise ValueError("usage: wakeful agents [on|off | AGENT on|off]")
         elif args.command == "extend":
             seconds = parse_duration(args.duration)
             if seconds is None:
@@ -90,27 +106,34 @@ def run_command(args: argparse.Namespace) -> int:
     if not result.get("ok"):
         print(f"wakeful: {result.get('error')}", file=sys.stderr)
         return 1
-    status = result["status"]
-    sessions = status.get("claude_sessions", [])
+    print_status(result["status"])
+    return 0
+
+
+def print_status(status: dict) -> None:
+    """Print a Status from the running tray, which may be older than this command."""
+    mode = Mode(status["mode"]) if status.get("mode") else Mode.SLEEP
+    how = mode.label.lower()
+    watching = status.get("watching", False)
+    sessions = status.get("sessions", [])
     if status["active"]:
-        mode = Mode(status["mode"])
-        if not status.get("while_claude"):
-            how_long = describe_remaining(status["remaining"])
-            print(f"Keeping awake ({mode.label.lower()}): {how_long}")
-        elif status.get("held"):
-            print(f"Keeping awake ({mode.label.lower()}) while Claude is working.")
-        else:
-            print(f"Sleep allowed until Claude is working ({mode.label.lower()}).")
-        if status["lid_ignored"]:
-            print("Closing the lid will not sleep.")
+        print(f"Keeping awake ({how}): {describe_remaining(status['remaining'])}")
+    elif watching and status.get("held"):
+        print(f"Keeping awake ({how}) while agents are working.")
+    elif watching:
+        print(f"Watching agents ({how}): sleep allowed until one is working.")
     else:
         print("Not keeping awake.")
+    if status["active"] and watching:
+        print("Also keeping awake while agents are working.")
+    if status.get("lid_ignored"):
+        print("Closing the lid will not sleep.")
+    if status.get("agents_enabled") and not watching:
+        print("Agentic checks are on, but no ticked agent is installed.")
     if sessions:
-        print("Claude sessions working:")
+        print("Agents working:")
         for s in sessions:
-            doing = WORKING.get(s["status"], s["status"])
-            print(f"  {s['name']} ({doing}) in {s['cwd']}")
-    return 0
+            print(f"  {s['agent']}: {s['name']} ({s['doing']}) in {s['cwd']}")
 
 
 def lid_tools_available() -> bool:
@@ -121,11 +144,13 @@ def run_app(no_tray: bool) -> int:
     from PyQt6.QtCore import QCoreApplication, QTimer
     from PyQt6.QtDBus import QDBusConnection
 
-    from .claude import SessionWatcher
+    from .claude import ClaudeWatcher
+    from .codex import CodexWatcher
     from .controller import Controller
     from .inhibit import DBusInhibitor
     from .lid import KConfigTools, LidError, LidGuard
     from .lidwatch import WatchedLidGuard
+    from .opencode import OpencodeWatcher
     from .powerdevil import refresh_status
 
     if no_tray:
@@ -149,7 +174,8 @@ def run_app(no_tray: bool) -> int:
         log.info("kreadconfig6/kwriteconfig6 not found; the lid option is unavailable")
     lid = WatchedLidGuard(guard) if guard is not None else None
 
-    controller = Controller(DBusInhibitor(bus), lid, claude=SessionWatcher())
+    agents = [ClaudeWatcher(), CodexWatcher(), OpencodeWatcher()]
+    controller = Controller(DBusInhibitor(bus), lid, agents=agents)
     holder = control.serve(bus, controller)
     if holder is None:
         print("wakeful is already running.", file=sys.stderr)

@@ -1,8 +1,8 @@
 import pytest
 
+from wakeful.agents import AgentSession
 from wakeful.block import Mode
-from wakeful.claude import ClaudeSession
-from wakeful.controller import CLAUDE_GRACE, Controller
+from wakeful.controller import AGENT_GRACE, Controller
 
 
 class FakeInhibitor:
@@ -240,8 +240,9 @@ def test_on_changed_fires(env):
     assert [s.active for s in seen] == [True, False]
 
 
-class FakeClaude:
-    def __init__(self):
+class FakeAgent:
+    def __init__(self, key="claude", label="Claude Code"):
+        self.key, self.label = key, label
         self.sessions = []
         self.installed = True
         self.reads = 0
@@ -251,236 +252,223 @@ class FakeClaude:
 
     def working(self):
         self.reads += 1
-        return self.sessions
+        return tuple(self.sessions)
 
 
-def session(name, status="busy"):
-    return ClaudeSession(1, name, status, "/work")
+def session(name, agent="Claude Code"):
+    return AgentSession(agent, 1, name, "working", "/work")
 
 
 @pytest.fixture
-def claude_env(env):
+def agents_env(env):
     _, inhibitor, lid, clock, ended = env
-    claude = FakeClaude()
-    c = Controller(inhibitor, lid, now=clock, claude=claude)
+    claude, codex = FakeAgent(), FakeAgent("codex", "Codex")
+    c = Controller(inhibitor, lid, now=clock, agents=[claude, codex])
     c.on_ended = lambda block, why: ended.append((block, why))
-    return c, inhibitor, lid, clock, claude, ended
+    c.set_watched("claude", True)
+    return c, inhibitor, lid, clock, claude, codex, ended
 
 
-def test_while_claude_holds_in_the_chosen_mode_and_names_the_sessions(claude_env):
-    c, inhibitor, _, _, claude, _ = claude_env
-    claude.sessions = [session("fix the tests"), session("docs", "shell")]
-    c.start(None, Mode.SCREEN, while_claude=True)
-    assert inhibitor.held == (Mode.SCREEN, "Claude is working: fix the tests, docs")
+def test_agentic_checks_hold_only_while_an_agent_works(agents_env):
+    c, inhibitor, _, clock, claude, _, _ = agents_env
+    c.set_mode(Mode.SCREEN)
+    c.set_agents_enabled(True)
     status = c.status()
-    assert status.active and status.while_claude and status.remaining is None
-    assert status.text == "Keeping awake while Claude is working"
-    c.set_mode(Mode.SLEEP)
-    assert inhibitor.held[0] is Mode.SLEEP
-
-
-def test_while_claude_started_with_nothing_working_waits_without_holding(claude_env):
-    c, inhibitor, _, _, claude, _ = claude_env
-    c.start(None, Mode.SLEEP, while_claude=True)
-    status = c.status()
-    assert status.active and status.while_claude and not status.held
-    assert status.text == "Sleep allowed until Claude is working"
+    assert status.watching and not status.held and not status.active
+    assert status.text == "Watching agents"
     assert inhibitor.held is None
-    claude.sessions = [session("a")]
+    claude.sessions = [session("fix the tests")]
     c.tick()
-    assert inhibitor.held == (Mode.SLEEP, "Claude is working: a")
+    assert inhibitor.held == (Mode.SCREEN, "Agents working: fix the tests")
     assert c.status().held
-
-
-def test_while_claude_needs_claude_code():
-    c = Controller(FakeInhibitor(), None, now=Clock())
-    with pytest.raises(RuntimeError, match="Claude Code was not found"):
-        c.start(None, Mode.SLEEP, while_claude=True)
-
-
-def test_claude_code_installed_after_startup_is_seen(claude_env):
-    c, inhibitor, _, _, claude, _ = claude_env
-    claude.installed = False
-    assert not c.claude_available
-    with pytest.raises(RuntimeError, match="Claude Code was not found"):
-        c.start(None, Mode.SLEEP, while_claude=True)
-    claude.installed = True
-    claude.sessions = [session("a")]
-    assert c.claude_available
-    c.start(None, Mode.SLEEP, while_claude=True)
+    claude.sessions = []
+    clock.t += AGENT_GRACE - 1
+    c.tick()
     assert inhibitor.held is not None
-
-
-def test_while_claude_releases_after_the_grace_period_and_keeps_waiting(claude_env):
-    c, inhibitor, _, clock, claude, ended = claude_env
-    claude.sessions = [session("a")]
-    c.start(None, Mode.SLEEP, while_claude=True)
-    claude.sessions = []
-    clock.t += CLAUDE_GRACE - 1
-    c.tick()
-    assert inhibitor.held == (Mode.SLEEP, "Keeping awake while Claude is working")
-    claude.sessions = [session("a")]  # back to work within the grace period
-    c.tick()
-    claude.sessions = []
-    clock.t += CLAUDE_GRACE - 1
-    c.tick()
-    assert c.status().held
     clock.t += 1
     c.tick()
     assert inhibitor.held is None
-    assert c.status().active and not c.status().held
-    assert ended == []
-    claude.sessions = [session("b")]
+    assert c.status().watching and c.status().agents_enabled
+
+
+def test_unticked_and_disabled_agents_are_not_watched(agents_env):
+    c, inhibitor, _, _, claude, codex, _ = agents_env
+    codex.sessions = [session("x", "Codex")]
+    c.set_agents_enabled(True)
     c.tick()
-    assert inhibitor.held == (Mode.SLEEP, "Claude is working: b")
-
-
-def test_lid_is_ignored_only_while_claude_holds(claude_env):
-    c, _, lid, clock, claude, _ = claude_env
-    c.ignore_lid = True
-    c.start(None, Mode.SLEEP, while_claude=True)
-    assert not lid.engaged
+    assert inhibitor.held is None and codex.reads == 0
     claude.sessions = [session("a")]
+    c.set_agents_enabled(False)
+    claude.reads = 0
     c.tick()
-    assert lid.engaged and c.status().lid_ignored
-    claude.sessions = []
-    clock.t += CLAUDE_GRACE
-    c.tick()
-    assert not lid.engaged
+    assert inhibitor.held is None and claude.reads == 0
+    assert not c.status().watching
 
 
-def test_timed_block_lists_working_sessions_but_keeps_its_reason(claude_env):
-    c, inhibitor, _, clock, claude, ended = claude_env
+def test_turning_agents_off_keeps_the_ticks(agents_env):
+    c, _, _, _, _, _, _ = agents_env
+    c.set_watched("codex", True)
+    c.set_agents_enabled(True)
+    c.set_agents_enabled(False)
+    assert c.status().watched == ("claude", "codex")
+
+
+def test_not_watching_when_no_ticked_agent_is_installed(agents_env):
+    c, _, _, _, claude, _, _ = agents_env
+    claude.installed = False
+    c.set_agents_enabled(True)
+    assert not c.status().watching
+
+
+def test_unknown_agent_is_refused(agents_env):
+    c, *_ = agents_env
+    with pytest.raises(ValueError, match="unknown agent"):
+        c.set_watched("cursor", True)
+
+
+def test_timer_and_agents_hold_together_and_the_timer_ending_hands_over(agents_env):
+    c, inhibitor, _, clock, claude, _, ended = agents_env
+    c.set_agents_enabled(True)
     claude.sessions = [session("a")]
     c.start(60, Mode.SLEEP)
-    assert c.status().claude == (session("a"),)
     assert inhibitor.held == (Mode.SLEEP, "Keeping awake: 1 min left")
+    assert c.status().sessions == (session("a"),)
     clock.t += 61
     c.tick()
-    assert inhibitor.held is None  # the timer decides, not Claude
-    assert c.status().claude == ()
     assert ended[0][1] == "expired"
+    assert inhibitor.held == (Mode.SLEEP, "Agents working: a")
+    assert c.status().agents_enabled
 
 
-def test_no_sessions_are_read_without_a_block(claude_env):
-    c, _, _, _, claude, _ = claude_env
+def test_stopping_the_timer_leaves_agentic_checks_on(agents_env):
+    c, inhibitor, _, _, claude, _, _ = agents_env
+    c.set_agents_enabled(True)
+    c.start(None, Mode.SLEEP)
+    c.stop()
+    assert inhibitor.held is None
+    assert c.status().watching
+    claude.sessions = [session("a")]
+    c.tick()
+    assert inhibitor.held is not None
+
+
+def test_timer_lists_ticked_sessions_without_agentic_checks(agents_env):
+    c, inhibitor, _, _, claude, _, _ = agents_env
+    claude.sessions = [session("a")]
+    c.start(3600, Mode.SLEEP)
+    assert c.status().sessions == (session("a"),)
+    c.stop()
+    assert inhibitor.held is None
+    assert c.status().sessions == ()
+
+
+def test_nothing_is_read_while_off(agents_env):
+    c, _, _, _, claude, _, _ = agents_env
     claude.sessions = [session("a")]
     c.tick()
     assert claude.reads == 0
 
 
-def test_reason_names_at_most_three_sessions(claude_env):
-    c, inhibitor, _, _, claude, _ = claude_env
-    claude.sessions = [session(n) for n in "abcde"]
-    c.start(None, Mode.SLEEP, while_claude=True)
-    assert inhibitor.held[1] == "Claude is working: a, b, c, 2 more"
-
-
-def test_watcher_error_counts_as_nothing_working(claude_env):
-    c, inhibitor, _, clock, claude, _ = claude_env
-    claude.sessions = [session("a")]
-    c.start(None, Mode.SLEEP, while_claude=True)
-    claude.working = lambda: 1 / 0
-    clock.t += CLAUDE_GRACE
-    c.tick()
-    assert inhibitor.held is None
-
-
-def test_failed_start_keeps_the_grace_of_the_running_while_claude_block(claude_env):
-    c, inhibitor, _, clock, claude, _ = claude_env
-    claude.sessions = [session("a")]
-    c.start(None, Mode.SLEEP, while_claude=True)
-    claude.sessions = []
-    clock.t += CLAUDE_GRACE - 10
-    c.tick()
-    claude.sessions = [session("b")]  # seen by the failing start only
-    inhibitor.fail = True
-    with pytest.raises(RuntimeError):
-        c.start(3600, Mode.SLEEP)
-    inhibitor.fail = False
-    assert c.status().claude == ()
-    claude.sessions = []
-    clock.t += 10
-    c.tick()
-    assert inhibitor.held is None
-    assert c.status().while_claude
-
-
-def test_restarting_a_while_claude_block_keeps_its_grace(claude_env):
-    c, inhibitor, _, clock, claude, _ = claude_env
-    claude.sessions = [session("a")]
-    c.start(None, Mode.SLEEP, while_claude=True)
-    claude.sessions = []
-    clock.t += 20
-    c.start(None, Mode.SCREEN, while_claude=True)
-    assert inhibitor.held == (Mode.SCREEN, "Keeping awake while Claude is working")
-    clock.t += CLAUDE_GRACE - 20
-    c.tick()
-    assert inhibitor.held is None
-
-
-def test_lid_follows_claude_after_a_failed_start(claude_env):
-    c, inhibitor, lid, _, claude, _ = claude_env
-    c.ignore_lid = True
-    c.start(None, Mode.SLEEP, while_claude=True)
-    inhibitor.fail = True
-    with pytest.raises(RuntimeError):
-        c.start(3600, Mode.SLEEP)
-    inhibitor.fail = False
-    claude.sessions = [session("a")]
-    c.tick()
-    assert inhibitor.held is not None
-    assert lid.engaged
-
-
-def test_grace_does_not_carry_over_from_a_stopped_block(claude_env):
-    c, inhibitor, _, _, claude, _ = claude_env
-    claude.sessions = [session("a")]
+def test_an_agent_that_is_not_installed_is_not_read(agents_env):
+    c, _, _, _, _, codex, _ = agents_env
+    c.set_watched("codex", True)
+    codex.installed = False
     c.start(3600, Mode.SLEEP)
+    assert codex.reads == 0
+
+
+def test_reason_names_at_most_three_sessions(agents_env):
+    c, inhibitor, _, _, claude, _, _ = agents_env
+    claude.sessions = [session(n) for n in "abcde"]
+    c.set_agents_enabled(True)
+    assert inhibitor.held[1] == "Agents working: a, b, c, 2 more"
+
+
+def test_one_failing_agent_does_not_hide_the_others(agents_env):
+    c, inhibitor, _, _, claude, codex, _ = agents_env
+    c.set_watched("codex", True)
+    claude.working = lambda: 1 / 0
+    codex.sessions = [session("x", "Codex")]
+    c.set_agents_enabled(True)
+    assert inhibitor.held == (Mode.SLEEP, "Agents working: x")
+
+
+def test_mode_change_applies_to_agentic_holds(agents_env):
+    c, inhibitor, _, _, claude, _, _ = agents_env
+    claude.sessions = [session("a")]
+    c.set_agents_enabled(True)
+    c.set_mode(Mode.SCREEN)
+    assert inhibitor.held[0] is Mode.SCREEN
+
+
+def test_a_timer_started_in_another_mode_does_not_change_the_chosen_one(agents_env):
+    c, _, _, _, _, _, _ = agents_env
+    c.start(60, Mode.SCREEN)
+    assert c.status().mode is Mode.SCREEN
     c.stop()
+    assert c.status().mode is Mode.SLEEP
+
+
+def test_lid_follows_agentic_holding(agents_env):
+    c, _, lid, clock, claude, _, _ = agents_env
+    c.ignore_lid = True
+    c.set_agents_enabled(True)
+    assert not lid.engaged
+    claude.sessions = [session("a")]
+    c.tick()
+    assert lid.engaged and c.status().lid_ignored
     claude.sessions = []
-    c.start(None, Mode.SLEEP, while_claude=True)
-    assert inhibitor.held is None
+    clock.t += AGENT_GRACE
+    c.tick()
+    assert not lid.engaged
 
 
-@pytest.mark.parametrize("change", ["set_mode", "extend"])
-def test_lid_follows_a_release_made_by_a_mode_change_or_extend(claude_env, change):
-    c, inhibitor, lid, clock, claude, _ = claude_env
+@pytest.mark.parametrize("change", ["set_mode", "turn_off"])
+def test_lid_follows_a_release_made_outside_the_tick(agents_env, change):
+    c, inhibitor, lid, _, claude, _, _ = agents_env
     c.ignore_lid = True
     claude.sessions = [session("a")]
-    c.start(None, Mode.SLEEP, while_claude=True)
-    claude.sessions = []
-    clock.t += CLAUDE_GRACE - 3
-    c.tick()
+    c.set_agents_enabled(True)
     assert lid.engaged
-    clock.t += 4
+    claude.sessions = []
     if change == "set_mode":
-        c.set_mode(Mode.SCREEN)
-    else:
-        c.extend(1800)
-    for _ in range(3):
-        clock.t += 5
-        c.tick()
+        c.set_mode(Mode.SCREEN)  # within the grace: still held
+        assert lid.engaged
+        return
+    c.set_agents_enabled(False)
     assert inhibitor.held is None
     assert not lid.engaged
 
 
-def test_failed_hold_is_not_reported_as_held(claude_env):
-    c, inhibitor, lid, _, claude, _ = claude_env
+def test_failed_hold_is_not_reported_as_held(agents_env):
+    c, inhibitor, lid, _, claude, _, _ = agents_env
     c.ignore_lid = True
-    c.start(None, Mode.SLEEP, while_claude=True)
+    c.set_agents_enabled(True)
     claude.sessions = [session("a")]
     inhibitor.fail = True
     c.tick()
-    assert not c.status().held
-    assert not lid.engaged
+    assert not c.status().held and not lid.engaged
     inhibitor.fail = False
     c.tick()
     assert c.status().held and lid.engaged
 
 
-def test_a_failing_lid_change_is_not_retried_on_every_tick(claude_env):
-    c, _, lid, clock, _, _ = claude_env
+def test_failed_timer_start_leaves_agentic_holding_alone(agents_env):
+    c, inhibitor, lid, _, claude, _, _ = agents_env
+    c.ignore_lid = True
+    claude.sessions = [session("a")]
+    c.set_agents_enabled(True)
+    inhibitor.fail = True
+    with pytest.raises(RuntimeError):
+        c.start(3600, Mode.SCREEN)
+    inhibitor.fail = False
+    assert not c.status().active and c.status().held
+    assert inhibitor.held == (Mode.SLEEP, "Agents working: a")
+    assert lid.engaged
+
+
+def test_a_failing_lid_change_is_not_retried_on_every_tick(agents_env):
+    c, _, lid, clock, _, _, _ = agents_env
     c.ignore_lid = True
     lid.fail_engage = True
     c.start(3600, Mode.SLEEP)
@@ -490,12 +478,10 @@ def test_a_failing_lid_change_is_not_retried_on_every_tick(claude_env):
     assert lid.calls == ["engage"]
 
 
-def test_failed_while_claude_start_keeps_the_running_block(claude_env):
-    c, inhibitor, _, _, claude, _ = claude_env
-    c.start(3600, Mode.SLEEP)
+def test_shutdown_releases_agentic_holding(agents_env):
+    c, inhibitor, lid, _, claude, _, _ = agents_env
+    c.ignore_lid = True
     claude.sessions = [session("a")]
-    inhibitor.fail = True
-    with pytest.raises(RuntimeError):
-        c.start(None, Mode.SCREEN, while_claude=True)
-    status = c.status()
-    assert status.active and not status.while_claude and status.remaining == 3600
+    c.set_agents_enabled(True)
+    c.shutdown()
+    assert inhibitor.held is None and not lid.engaged

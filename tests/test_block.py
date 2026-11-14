@@ -1,7 +1,6 @@
 import pytest
 
 from wakeful.block import (
-    Block,
     Mode,
     Session,
     describe_duration,
@@ -163,13 +162,3 @@ def test_parse_duration(text, seconds):
 def test_parse_duration_rejects(text):
     with pytest.raises(ValueError):
         parse_duration(text)
-
-
-def test_while_claude_block_has_no_duration_and_keeps_it_through_a_mode_change():
-    s = Session()
-    with pytest.raises(ValueError):
-        s.start(60, Mode.SLEEP, 0.0, while_claude=True)
-    s.start(None, Mode.SLEEP, 0.0, while_claude=True)
-    s.set_mode(Mode.SCREEN)
-    assert s.block == Block(Mode.SCREEN, None, while_claude=True)
-    assert not s.block.expired(1e9)

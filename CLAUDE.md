@@ -50,12 +50,13 @@ None of these is a documented interface. Each watcher module's docstring documen
 - **opencode**, checked by running 1.19.3 on Linux, and in source at `v1.19.3` and `v2.3.0`.
   1.x writes an assistant message without `time.completed` when a step starts and completes it
   when the step ends (`session/processor.ts`); streaming writes nothing. A killed process
-  leaves its step unfinished for good. 2.x (read from `v2.3.0` source, not seen running) ships
-  from GitHub releases, not the `opencode-ai` npm package, as a binary named `opencode`. It
-  uses the same `opencode.db` for release builds (`opencode-<channel>.db` otherwise, or
-  `$OPENCODE_DB`; `packages/cli/src/database-path.ts`), copies 1.x sessions into `session_v2`
-  and keeps the old tables, and sets `time_busy` / `time_idle` in milliseconds
-  (`packages/core/src/session/projector.ts`). Neither records a pid, and the database also holds credentials. A read-only SQLite
+  leaves its step unfinished for good. 2.x, checked by running v2.3.0 on Linux and in its source,
+  ships from GitHub releases, not the `opencode-ai` npm package, as a binary named `opencode`.
+  It uses the same `opencode.db` for release builds (`opencode-<channel>.db` otherwise, or
+  `$OPENCODE_DB`; `packages/cli/src/database-path.ts`); a fresh one has only `session_v2`, and
+  one migrated from 1.x keeps the old tables too. `time_busy` / `time_idle` are milliseconds
+  (`packages/core/src/session/projector.ts`). Test turns against the user's Ollama must use the
+  models its warmer keeps loaded, or a free `opencode/*` model with no Ollama provider configured. Neither records a pid, and the database also holds credentials. A read-only SQLite
   reader creates `-wal`/`-shm` beside the database if they are absent.
 
 ## Surfaces that must stay in sync

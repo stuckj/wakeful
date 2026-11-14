@@ -69,7 +69,10 @@ def test_unreadable_files_and_missing_directory_are_skipped(tmp_path):
     (tmp_path / "100.json").write_text("{half")
     (tmp_path / "200.json").write_text("[]")
     (tmp_path / "300.json").write_text(json.dumps({"pid": "300", "status": "busy"}))
-    assert names(watcher(tmp_path)) == []
+    write(tmp_path, 400, status=["busy"])
+    write(tmp_path, 500, name="good")
+    alive = {100: 500, 200: 500, 300: 500, 400: 500, 500: 500}
+    assert names(watcher(tmp_path, alive)) == ["good"]
     assert names(watcher(tmp_path / "missing")) == []
 
 

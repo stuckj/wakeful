@@ -105,7 +105,7 @@ class SessionWatcher:
         except (OSError, ValueError):
             # Claude Code may be rewriting it; the next poll reads it again.
             return None
-        if not isinstance(data, dict) or data.get("status") not in WORKING:
+        if not isinstance(data, dict) or str(data.get("status")) not in WORKING:
             return None
         pid = data.get("pid")
         if not isinstance(pid, int) or pid <= 0:

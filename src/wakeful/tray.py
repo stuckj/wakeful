@@ -134,6 +134,7 @@ class Tray(QObject):
         )
         self._while_claude_action = self._start_menu.addAction("While Claude is working")
         self._while_claude_action.triggered.connect(self._start_while_claude)
+        self._while_claude_action.setVisible(self._controller.claude_available)
         self._start_menu.aboutToShow.connect(
             lambda: self._while_claude_action.setVisible(self._controller.claude_available)
         )

@@ -244,11 +244,13 @@ class FakeClaude:
     def __init__(self):
         self.sessions = []
         self.installed = True
+        self.reads = 0
 
     def available(self):
         return self.installed
 
     def working(self):
+        self.reads += 1
         return self.sessions
 
 
@@ -342,7 +344,7 @@ def test_no_sessions_are_read_without_a_block(claude_env):
     c, _, _, _, claude, _ = claude_env
     claude.sessions = [session("a")]
     c.tick()
-    assert c.status().claude == ()
+    assert claude.reads == 0
 
 
 def test_reason_names_at_most_three_sessions(claude_env):

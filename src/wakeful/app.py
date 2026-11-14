@@ -128,6 +128,10 @@ def print_status(status: dict) -> None:
         print("Also keeping awake while agents are working.")
     if status.get("lid_ignored"):
         print("Closing the lid will not sleep.")
+    if "watched" in status:
+        ticked = ", ".join(status["watched"]) or "none"
+        state = "on" if status.get("agents_enabled") else "off"
+        print(f"Agentic checks: {state} (ticked: {ticked})")
     if status.get("agents_enabled") and not watching:
         print("Agentic checks are on, but no ticked agent is installed.")
     if sessions:

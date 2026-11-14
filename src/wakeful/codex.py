@@ -6,9 +6,10 @@ it writes say the same. Neither is a documented interface:
   $CODEX_HOME/thread-writer-locks/<thread>.lock
       flock-ed by the process writing that thread for as long as it is open.
       The kernel drops the lock when the process dies; the file stays.
-  $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread>.jsonl
-      One JSON event per line. A turn writes {"type": "event_msg", "payload":
-      {"type": "task_started"}} when it begins and "task_complete" or
+  $CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread>[_<id>].jsonl
+      One JSON event per line; editing an earlier prompt starts a new file.
+      A turn writes {"type": "event_msg", "payload": {"type": "task_started"}}
+      when it begins and "task_complete" or
       "turn_aborted" when it ends ("turn_started"/"turn_complete" in older
       versions). The first line is "session_meta", whose payload has the cwd.
 
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 from .agents import AgentSession
@@ -36,9 +38,9 @@ def codex_home() -> Path:
     return Path(env) if env else Path.home() / ".codex"
 
 
-def flock_holders(text: str) -> dict[tuple[int, int, int], int]:
-    """Map (major, minor, inode) to the holding pid, from /proc/locks."""
-    holders: dict[tuple[int, int, int], int] = {}
+def flock_holders(text: str) -> dict[int, list[tuple[int, int, int]]]:
+    """Map each inode to the (major, minor, pid) of its flock holders, from /proc/locks."""
+    holders: dict[int, list[tuple[int, int, int]]] = {}
     for line in text.splitlines():
         fields = line.split()
         # "1: FLOCK  ADVISORY  WRITE 1234 fd:01:5678 0 EOF"; a waiter's line
@@ -47,10 +49,26 @@ def flock_holders(text: str) -> dict[tuple[int, int, int], int]:
             continue
         try:
             major, minor, inode = fields[5].split(":")
-            holders[(int(major, 16), int(minor, 16), int(inode))] = int(fields[4])
+            entry = (int(major, 16), int(minor, 16), int(fields[4]))
         except ValueError:
             continue
+        holders.setdefault(int(inode), []).append(entry)
     return holders
+
+
+def has_open(proc: Path, pid: int, path: Path) -> bool:
+    """pid has path open, by its /proc fd links."""
+    target = str(path)
+    try:
+        for fd in (proc / str(pid) / "fd").iterdir():
+            try:
+                if os.readlink(fd) == target:
+                    return True
+            except OSError:
+                continue
+    except OSError:
+        return False
+    return False
 
 
 def last_turn_event(path: Path) -> str | None:
@@ -71,6 +89,13 @@ def last_turn_event(path: Path) -> str | None:
         return None
 
 
+def _mtime(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return -1
+
+
 def _turn_event(line: bytes) -> str | None:
     if b"task_" not in line and b"turn_" not in line:
         return None
@@ -89,11 +114,13 @@ class CodexWatcher:
     key = "codex"
     label = "Codex"
 
-    def __init__(self, home: Path | None = None, locks: Path = Path("/proc/locks")) -> None:
+    def __init__(self, home: Path | None = None, proc: Path = Path("/proc")) -> None:
         self.home = home or codex_home()
-        self._locks = locks
+        self._proc = proc
         self._rollouts: dict[str, Path] = {}
         self._cwds: dict[Path, str] = {}
+        self._confirmed: set[tuple[int, int]] = set()
+        """(inode, pid) pairs already seen holding a lock file open."""
 
     def available(self) -> bool:
         return any((self.home / n).exists() for n in ("sessions", "config.toml", "auth.json"))
@@ -106,7 +133,7 @@ class CodexWatcher:
             return ()
         if not lock_files:
             return ()
-        holders = flock_holders(self._locks.read_text())
+        holders = flock_holders((self._proc / "locks").read_text())
         found = []
         for lock in sorted(lock_files):
             if lock.name.startswith("."):
@@ -115,7 +142,7 @@ class CodexWatcher:
                 st = lock.stat()
             except OSError:
                 continue
-            pid = holders.get((os.major(st.st_dev), os.minor(st.st_dev), st.st_ino))
+            pid = self._holder(lock, st, holders.get(st.st_ino, []))
             if pid is None:
                 continue
             rollout = self._rollout(lock.stem)
@@ -131,15 +158,37 @@ class CodexWatcher:
             found.append(AgentSession(self.label, pid, name, "working", cwd))
         return tuple(found)
 
+    def _holder(self, lock: Path, st: os.stat_result, entries: list) -> int | None:
+        """The pid holding lock, or None. /proc/locks names the filesystem's device,
+        which on btrfs is not the subvolume's st_dev, so an inode match is confirmed
+        by the pid having the file open."""
+        for major, minor, pid in entries:
+            if (major, minor) == (os.major(st.st_dev), os.minor(st.st_dev)):
+                return pid
+        for _major, _minor, pid in entries:
+            if (st.st_ino, pid) in self._confirmed or has_open(self._proc, pid, lock):
+                self._confirmed.add((st.st_ino, pid))
+                return pid
+        return None
+
     def _rollout(self, thread: str) -> Path | None:
+        """The thread's newest rollout. Editing an earlier prompt starts a new one,
+        rollout-<time>-<thread>_<id>.jsonl, in the folder for the day it was made."""
+        sessions = self.home / "sessions"
+        pattern = f"rollout-*-{thread}*.jsonl"
         cached = self._rollouts.get(thread)
-        if cached is not None and cached.exists():
-            return cached
-        matches = sorted((self.home / "sessions").glob(f"*/*/*/rollout-*-{thread}.jsonl"))
-        if not matches:
-            return None
-        self._rollouts[thread] = matches[-1]
-        return matches[-1]
+        folders = {
+            sessions / time.strftime("%Y/%m/%d", t) for t in (time.localtime(), time.gmtime())
+        }
+        if cached is not None:
+            folders.add(cached.parent)
+        matches = [p for folder in folders for p in folder.glob(pattern)]
+        if cached is None or not matches:
+            matches = list(sessions.glob(f"*/*/*/{pattern}"))
+        newest = max(matches, key=_mtime, default=None)
+        if newest is not None:
+            self._rollouts[thread] = newest
+        return newest
 
     def _cwd(self, rollout: Path) -> str:
         if rollout not in self._cwds:

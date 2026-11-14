@@ -43,10 +43,10 @@ class AgentWatcher(Protocol):
         """Its sessions that are working now. May raise; the caller treats that as none."""
 
 
-def proc_start(pid: int) -> int | None:
+def proc_start(pid: int, proc: Path = Path("/proc")) -> int | None:
     """The start time of pid in clock ticks since boot, or None if it is gone."""
     try:
-        stat = Path(f"/proc/{pid}/stat").read_text()
+        stat = (proc / str(pid) / "stat").read_text()
     except OSError:
         return None
     # The command name in field 2 may contain spaces and parentheses.

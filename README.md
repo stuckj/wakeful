@@ -150,13 +150,13 @@ How each agent is read, every five seconds while it matters (agentic checks on, 
 | --- | --- | --- | --- |
 | Claude Code | its file in `~/.claude/sessions` says it is busy, or running a shell after the turn | the process is gone, or its number was reused | A session waiting for you to approve a command does not count. `$CLAUDE_CONFIG_DIR` is honoured if set in the environment Wakeful was started in. |
 | Codex | the last turn event in its rollout file under `~/.codex/sessions` is a start | no process holds the thread's lock in `~/.codex/thread-writer-locks` | A turn waiting for your approval counts as working. `$CODEX_HOME` is honoured as above. |
-| opencode | its database (`~/.local/share/opencode/opencode.db`, opened read-only) has an unfinished step | no opencode process runs in the session's directory, or the step is over three hours old | Waiting for your approval counts as working. The database is queried only when it has changed. |
+| opencode | its database (`~/.local/share/opencode/opencode.db`, opened read-only) has an unfinished step | no opencode process that started before the step runs in the session's directory, as after a crash | Waiting for your approval counts as working. The database is not opened while no opencode process runs; while one does, SQLite records each read in the database's shared-memory file, as any reader does. |
 
 None of these are documented interfaces, so a future release of an agent could change them, and Wakeful would stop seeing its sessions until it catches up.
 
 A background shell or tool that never ends, such as a forgotten `tail -f`, keeps the computer awake until it is stopped. The submenu shows which session has it.
 
-The checks cost little: reading Claude Code's few small files takes under a millisecond, opencode's database is only queried when it has changed, and Wakeful already wakes every five seconds whether or not anything is checked.
+The checks cost little: each agent's check takes a few hundred microseconds to under two milliseconds of CPU every five seconds — about a second of CPU an hour at most — and Wakeful already wakes every five seconds whether or not anything is checked.
 
 ## Documentation
 

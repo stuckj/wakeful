@@ -47,10 +47,12 @@ None of these is a documented interface. Each watcher module's docstring documen
   cwd. `thread-writer-locks/<thread>.lock` is flock-held, by the app-server daemon when one runs,
   for as long as the thread is open, not only during a turn. That directory also holds
   `.coordination.lock`, which is not a thread. Approval waits are not persisted.
-- **opencode**, schema checked against an installed 1.19.3; behaviour read from source at
-  `v1.19.3` and `v2.3.0`. 1.x writes an assistant message without `time.completed` when a step
-  starts (`session/processor.ts`); streaming writes nothing. 2.x has `session_v2.time_busy` and
-  `time_idle`. Neither records a pid, and the database also holds credentials.
+- **opencode**, checked by running 1.19.3 on Linux, and in source at `v1.19.3` and `v2.3.0`.
+  1.x writes an assistant message without `time.completed` when a step starts and completes it
+  when the step ends (`session/processor.ts`); streaming writes nothing. A killed process
+  leaves its step unfinished for good. 2.x has `session_v2.time_busy` and `time_idle` (not seen
+  running). Neither records a pid, and the database also holds credentials. A read-only SQLite
+  reader creates `-wal`/`-shm` beside the database if they are absent.
 
 ## Surfaces that must stay in sync
 

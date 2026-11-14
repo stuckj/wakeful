@@ -10,10 +10,12 @@ is a documented interface:
   2.x  session_v2.time_busy is set when a run starts and time_idle when it
        ends; the session is working while time_busy is the later.
 
-The database is opened read-only, and only the session and message tables are
-read; the same file holds credentials. It records no process, so a session
-counts only while an opencode process runs in its directory, and only if the
-unfinished step is recent: a crash leaves one behind for good.
+The database records no process, and a crash leaves an unfinished step behind
+for good. So a step counts only while an opencode process runs in its session's
+directory and was started before the step: one left by an earlier process is
+older than every process running now. Nothing is read while no opencode process
+runs. The database is opened read-only, and only the session and message tables
+are read; the same file holds credentials.
 """
 
 from __future__ import annotations
@@ -22,19 +24,21 @@ import os
 import sqlite3
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
-from .agents import AgentSession
+from .agents import AgentSession, proc_start
 
-STALE_AFTER = 3 * 3600
-"""An unfinished step this old (seconds) is taken to be left by a crash."""
 REQUERY_AFTER = 60
 BINARIES = {"opencode", "opencode.exe"}
+CLOCK_SLACK = 2.0
+"""Seconds of disagreement allowed between a process's start time, derived from
+the boot time, and the wall-clock times opencode records."""
 
 WORKING_V1 = """
-    SELECT s.id, s.title, s.directory
+    SELECT s.id, s.title, s.directory, max(m.time_created)
     FROM message m JOIN session s ON s.id = m.session_id
-    WHERE m.time_updated >= ?
+    WHERE m.time_created >= ?
       AND json_extract(m.data, '$.role') = 'assistant'
       AND json_extract(m.data, '$.time.completed') IS NULL
     GROUP BY s.id
@@ -45,23 +49,48 @@ WORKING_V2 = """
 """
 
 
+@dataclass(frozen=True)
+class Process:
+    pid: int
+    cwd: str
+    started: float
+    """Seconds since the epoch."""
+
+
 def data_dir() -> Path:
     base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
     return Path(base) / "opencode"
 
 
-def opencode_cwds(proc: Path = Path("/proc")) -> dict[str, int]:
-    """Working directory to pid, for every opencode process this user can see."""
-    found: dict[str, int] = {}
+def boot_time(proc: Path = Path("/proc")) -> float:
+    for line in (proc / "stat").read_text().splitlines():
+        if line.startswith("btime "):
+            return float(line.split()[1])
+    raise OSError("no btime in /proc/stat")
+
+
+def opencode_processes(proc: Path = Path("/proc")) -> list[Process]:
+    """Every opencode process this user can see, with its cwd and start time."""
+    ticks = os.sysconf("SC_CLK_TCK")
+    booted: float | None = None
+    found = []
     for entry in proc.iterdir():
         if not entry.name.isdigit():
             continue
         try:
-            if Path(os.readlink(entry / "exe")).name not in BINARIES:
+            # An upgraded binary shows as "/path/opencode.exe (deleted)".
+            exe = os.readlink(entry / "exe").removesuffix(" (deleted)")
+            if Path(exe).name not in BINARIES:
                 continue
-            found[os.readlink(entry / "cwd")] = int(entry.name)
+            cwd = os.readlink(entry / "cwd")
         except OSError:
             continue
+        start = proc_start(int(entry.name), proc)
+        if start is None:
+            continue
+        if booted is None:
+            booted = boot_time(proc)
+        found.append(Process(int(entry.name), cwd, booted + start / ticks))
     return found
 
 
@@ -78,6 +107,11 @@ def _within(directory: str, cwd: str) -> bool:
     return a == b or a.startswith(b + "/") or b.startswith(a + "/")
 
 
+def _seconds(t: float) -> float:
+    """opencode times are milliseconds since the epoch; accept seconds too."""
+    return t / 1000 if t > 1e11 else t
+
+
 class OpencodeWatcher:
     key = "opencode"
     label = "opencode"
@@ -91,50 +125,52 @@ class OpencodeWatcher:
         self.home = home or data_dir()
         self._proc = proc
         self._now = now
-        self._stamp: tuple[tuple[int, int] | None, ...] = ()
+        self._key: tuple = ()
         self._queried_at = float("-inf")
-        self._busy: list[tuple[str, str, str]] = []
+        self._busy: list[tuple[str, str, str, float]] = []
 
     def available(self) -> bool:
         return (self.home / "opencode.db").is_file()
 
     def working(self) -> tuple[AgentSession, ...]:
-        # A step starts or finishes only by writing the database, so the query
-        # is repeated only when it or its WAL changes, or a minute has passed.
-        stamp = tuple(_stamp(self.home / n) for n in ("opencode.db", "opencode.db-wal"))
-        if stamp != self._stamp or self._now() - self._queried_at >= REQUERY_AFTER:
-            self._busy = self._busy_sessions()
-            self._stamp, self._queried_at = stamp, self._now()
-        busy = self._busy
-        if not busy:
+        procs = opencode_processes(self._proc)
+        if not procs:
             return ()
-        cwds = opencode_cwds(self._proc)
+        since = min(p.started for p in procs) - CLOCK_SLACK
+        # A step starts or finishes only by writing the database, so the query
+        # is repeated only when it or its WAL changes, when the processes
+        # change, or once a minute.
+        key = (since, *(_stamp(self.home / n) for n in ("opencode.db", "opencode.db-wal")))
+        if key != self._key or self._now() - self._queried_at >= REQUERY_AFTER:
+            self._busy = self._busy_sessions(since)
+            self._key, self._queried_at = key, self._now()
         found = []
-        for _id, title, directory in busy:
-            pid = next((p for cwd, p in cwds.items() if _within(directory, cwd)), None)
-            if pid is None:
-                continue
-            name = title or Path(directory).name
-            found.append(AgentSession(self.label, pid, name, "working", directory))
+        for _id, title, directory, step in self._busy:
+            owner = next(
+                (p for p in procs if _within(directory, p.cwd) and p.started - CLOCK_SLACK <= step),
+                None,
+            )
+            if owner is not None:
+                name = title or Path(directory).name
+                found.append(AgentSession(self.label, owner.pid, name, "working", directory))
         return tuple(found)
 
-    def _busy_sessions(self) -> list[tuple[str, str, str]]:
+    def _busy_sessions(self, since: float) -> list[tuple[str, str, str, float]]:
+        """Sessions with a step begun since `since`, and when that step began."""
         db = self.home / "opencode.db"
         if not db.is_file():
             return []
-        since = self._now() - STALE_AFTER
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=0.5)
+        conn = sqlite3.connect(f"{db.absolute().as_uri()}?mode=ro", uri=True, timeout=0.5)
         try:
             tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
             if "session_v2" in tables:
-                rows = [
-                    (a, b, c)
-                    for a, b, c, busy in conn.execute(WORKING_V2)
-                    # Seconds or milliseconds since the epoch.
-                    if (busy / 1000 if busy > 1e11 else busy) >= since
-                ]
+                rows = list(conn.execute(WORKING_V2))
             else:
                 rows = list(conn.execute(WORKING_V1, (int(since * 1000),)))
         finally:
             conn.close()
-        return [(str(a), str(b or ""), str(c or "")) for a, b, c in rows]
+        return [
+            (str(a), str(b or ""), str(c or ""), _seconds(t))
+            for a, b, c, t in rows
+            if t is not None and _seconds(t) >= since
+        ]

@@ -28,6 +28,7 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 WORKING = {"busy": "working", "shell": "running a shell"}
+LABEL_MAX = 60
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,13 @@ class ClaudeSession:
     @property
     def doing(self) -> str:
         return WORKING.get(self.status, self.status)
+
+    @property
+    def label(self) -> str:
+        """The name, shortened for display: an untitled session is named after its prompt."""
+        if len(self.name) <= LABEL_MAX:
+            return self.name
+        return self.name[: LABEL_MAX - 1].rstrip() + "…"
 
 
 def config_dir() -> Path:

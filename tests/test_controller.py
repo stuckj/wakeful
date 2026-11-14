@@ -393,14 +393,41 @@ def test_failed_start_keeps_the_grace_of_the_running_while_claude_block(claude_e
     claude.sessions = []
     clock.t += CLAUDE_GRACE - 10
     c.tick()
+    claude.sessions = [session("b")]  # seen by the failing start only
     inhibitor.fail = True
     with pytest.raises(RuntimeError):
         c.start(3600, Mode.SLEEP)
     inhibitor.fail = False
+    assert c.status().claude == ()
+    claude.sessions = []
     clock.t += 10
     c.tick()
     assert inhibitor.held is None
     assert c.status().while_claude
+
+
+def test_restarting_a_while_claude_block_keeps_its_grace(claude_env):
+    c, inhibitor, _, clock, claude, _ = claude_env
+    claude.sessions = [session("a")]
+    c.start(None, Mode.SLEEP, while_claude=True)
+    claude.sessions = []
+    clock.t += 20
+    c.start(None, Mode.SCREEN, while_claude=True)
+    assert inhibitor.held == (Mode.SCREEN, "Keeping awake while Claude is working")
+    clock.t += CLAUDE_GRACE - 20
+    c.tick()
+    assert inhibitor.held is None
+
+
+def test_a_failing_lid_change_is_not_retried_on_every_tick(claude_env):
+    c, _, lid, clock, _, _ = claude_env
+    c.ignore_lid = True
+    lid.fail_engage = True
+    c.start(3600, Mode.SLEEP)
+    for _ in range(3):
+        clock.t += 5
+        c.tick()
+    assert lid.calls == ["engage"]
 
 
 def test_failed_while_claude_start_keeps_the_running_block(claude_env):

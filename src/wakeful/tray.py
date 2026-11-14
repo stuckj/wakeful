@@ -232,7 +232,7 @@ class Tray(QObject):
         menu.menuAction().setVisible(bool(sessions))
         for s in sessions:
             # A single & in action text marks a keyboard shortcut and is not shown.
-            name = s.name.replace("&", "&&")
+            name = s.label.replace("&", "&&")
             menu.addAction(f"{name} — {s.doing}").setEnabled(False)
 
     def _click_starts_while_claude(self) -> bool:

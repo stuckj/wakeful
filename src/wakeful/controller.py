@@ -83,7 +83,7 @@ def reason_text(remaining: float | None) -> str:
 def claude_reason_text(sessions: Sequence[ClaudeSession]) -> str:
     if not sessions:
         return WHILE_CLAUDE_TEXT
-    names = [s.name for s in sessions[:CLAUDE_NAMES_SHOWN]]
+    names = [s.label for s in sessions[:CLAUDE_NAMES_SHOWN]]
     if len(sessions) > CLAUDE_NAMES_SHOWN:
         names.append(f"{len(sessions) - CLAUDE_NAMES_SHOWN} more")
     return f"Claude is working: {', '.join(names)}"
@@ -106,6 +106,8 @@ class Controller:
         self._lid_engaged = False
         self._claude: tuple[ClaudeSession, ...] = ()
         self._claude_seen_at: float | None = None
+        self._held = False
+        """What the last _apply() decided, so tick() can see holding change."""
         self.on_changed: Callable[[Status], None] = lambda status: None
         self.on_ended: Callable[[Block, str], None] = lambda block, why: None
         """Called with the block and 'expired' or 'stopped'."""
@@ -166,8 +168,6 @@ class Controller:
         self._claude = sessions
         if sessions:
             self._claude_seen_at = self._now()
-        elif while_claude:
-            self._claude_seen_at = None
         try:
             self._apply()
         except Exception:
@@ -212,13 +212,15 @@ class Controller:
         if block.expired(now):
             self._end("expired")
             return
+        was_holding = self._held
         # Retried on every tick: hold() also re-takes an inhibition that was
         # lost, for example to a PowerDevil restart.
         try:
             self._apply()
         except Exception as e:
             log.warning("could not refresh the inhibition: %s", e)
-        self._sync_lid()
+        if self._holding() != was_holding:
+            self._sync_lid()
         self._changed()
 
     def shutdown(self) -> None:
@@ -243,7 +245,8 @@ class Controller:
         """Hold the inhibition the block asks for right now, or release it."""
         block = self._session.block
         assert block is not None
-        if not self._holding():
+        self._held = self._holding()
+        if not self._held:
             self._inhibitor.release()
         elif block.while_claude:
             self._inhibitor.hold(block.mode, claude_reason_text(self._claude))

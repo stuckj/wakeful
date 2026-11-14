@@ -1,7 +1,7 @@
 import json
 import os
 
-from wakeful.claude import SessionWatcher, proc_start
+from wakeful.claude import LABEL_MAX, ClaudeSession, SessionWatcher, proc_start
 
 DOMAIN = "linux:abc:pid:[1]"
 
@@ -74,6 +74,12 @@ def test_unreadable_files_and_missing_directory_are_skipped(tmp_path):
     alive = {100: 500, 200: 500, 300: 500, 400: 500, 500: 500}
     assert names(watcher(tmp_path, alive)) == ["good"]
     assert names(watcher(tmp_path / "missing")) == []
+
+
+def test_label_shortens_a_name_taken_from_a_long_prompt():
+    long = ClaudeSession(1, "word " * 40, "busy", "/w")
+    assert len(long.label) == LABEL_MAX and long.label.endswith("…")
+    assert ClaudeSession(1, "short", "busy", "/w").label == "short"
 
 
 def test_available_follows_the_config_directory(tmp_path):

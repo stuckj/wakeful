@@ -113,8 +113,9 @@ working while the last turn event is a start and a process holds the thread's
 lock in \fI$CODEX_HOME/thread\-writer\-locks\fR. Waiting for approval counts.
 .TP
 .B opencode
-\fI$XDG_DATA_HOME/opencode/opencode.db\fR, opened read\-only and only while an
-opencode process runs: working while it has an unfinished step, an opencode
+\fI$XDG_DATA_HOME/opencode/opencode.db\fR (and, for 2.x, \fIopencode\-*.db\fR or
+\fB$OPENCODE_DB\fR), opened read\-only and only while an opencode process runs:
+working while it has an unfinished step or a busy run, an opencode
 process that started before that step runs in the session's directory or below
 it, and the session has been written in the last two hours. Waiting for
 approval counts.

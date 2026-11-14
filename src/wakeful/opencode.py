@@ -1,8 +1,10 @@
 """Which opencode sessions on this machine are working right now.
 
 Qt-free. opencode (opencode.ai) keeps its working state in memory only, but its
-SQLite database at $XDG_DATA_HOME/opencode/opencode.db shows the same. Neither
-is a documented interface:
+SQLite database at $XDG_DATA_HOME/opencode/opencode.db (or opencode-<channel>.db,
+or $OPENCODE_DB, for 2.x) shows the same. 2.x copies 1.x's sessions into its own
+tables and keeps the old ones, so both kinds are read. Neither is a documented
+interface:
 
   1.x  An assistant message is written when a step starts, with
        data.time.completed unset, and completed when the step and its tools
@@ -139,8 +141,15 @@ class OpencodeWatcher:
         self._queried_at = float("-inf")
         self._busy: list[tuple[str, str, str, float, float | None]] = []
 
+    def databases(self) -> list[Path]:
+        """opencode.db, and the per-channel opencode-<channel>.db of 2.x builds."""
+        env = os.environ.get("OPENCODE_DB")
+        found = [self.home / env] if env and env != ":memory:" else []
+        found += [self.home / "opencode.db", *sorted(self.home.glob("opencode-*.db"))]
+        return [db for db in dict.fromkeys(found) if db.is_file()]
+
     def available(self) -> bool:
-        return (self.home / "opencode.db").is_file()
+        return bool(self.databases())
 
     def working(self) -> tuple[AgentSession, ...]:
         procs = opencode_processes(self._proc)
@@ -148,11 +157,12 @@ class OpencodeWatcher:
             return ()
         since = min(p.started for p in procs) - CLOCK_SLACK
         # A step starts or finishes only by writing the database, so the query
-        # is repeated only when it or its WAL changes, when the processes
-        # change, or once a minute.
-        key = (since, *(_stamp(self.home / n) for n in ("opencode.db", "opencode.db-wal")))
+        # is repeated only when one changes, when the processes change, or once
+        # a minute.
+        dbs = self.databases()
+        key = (since, *(_stamp(Path(f"{db}{suffix}")) for db in dbs for suffix in ("", "-wal")))
         if key != self._key or self._now() - self._queried_at >= REQUERY_AFTER:
-            self._busy = self._busy_sessions(since)
+            self._busy = [row for db in dbs for row in self._busy_sessions(db, since)]
             self._key, self._queried_at = key, self._now()
         found = []
         for _id, title, directory, step, last_write in self._busy:
@@ -167,24 +177,24 @@ class OpencodeWatcher:
                 found.append(AgentSession(self.label, owner.pid, name, "working", directory))
         return tuple(found)
 
-    def _busy_sessions(self, since: float) -> list[tuple[str, str, str, float, float | None]]:
+    def _busy_sessions(
+        self, db: Path, since: float
+    ) -> list[tuple[str, str, str, float, float | None]]:
         """Sessions with a step begun since `since`: when that step began, and,
-        for 1.x, when the session was last written."""
-        db = self.home / "opencode.db"
-        if not db.is_file():
-            return []
+        for 1.x, when the session was last written. 2.x keeps 1.x's tables
+        beside its own, so both are read: either version may be the one running."""
         conn = sqlite3.connect(f"{db.absolute().as_uri()}?mode=ro", uri=True, timeout=0.5)
         try:
             tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
-            v2 = "session_v2" in tables
-            if v2:
-                rows = list(conn.execute(WORKING_V2))
-            else:
-                rows = list(conn.execute(WORKING_V1, (int(since * 1000),)))
+            rows = []
+            if "session_v2" in tables:
+                rows += [(a, b, c, t, None) for a, b, c, t, _ in conn.execute(WORKING_V2)]
+            if {"session", "message", "part"} <= tables:
+                rows += list(conn.execute(WORKING_V1, (int(since * 1000),)))
         finally:
             conn.close()
         return [
-            (str(a), str(b or ""), str(c or ""), _seconds(t), None if v2 else _seconds(w or 0))
+            (str(a), str(b or ""), str(c or ""), _seconds(t), None if w is None else _seconds(w))
             for a, b, c, t, w in rows
             if t is not None and _seconds(t) >= since
         ]

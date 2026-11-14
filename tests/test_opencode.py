@@ -126,7 +126,7 @@ def test_the_database_is_not_opened_while_opencode_is_not_running(tmp_path):
     proc.mkdir()
     (proc / "stat").write_text(f"btime {BOOT}\n")
     w = OpencodeWatcher(home, proc, now=Clock())
-    w._busy_sessions = lambda since: pytest.fail("queried with no opencode running")
+    w._busy_sessions = lambda db, since: pytest.fail("queried with no opencode running")
     assert w.working() == ()
 
 
@@ -136,7 +136,7 @@ def test_the_query_is_repeated_only_when_the_database_changes(tmp_path, watcher)
     w = OpencodeWatcher(tmp_path / "data", fake_proc(tmp_path), now=clock)
     queries = []
     query = w._busy_sessions
-    w._busy_sessions = lambda since: queries.append(since) or query(since)
+    w._busy_sessions = lambda db, since: queries.append(since) or query(db, since)
     assert w.working() == ()
     clock.t += REQUERY_AFTER - 1
     assert w.working() == ()
@@ -175,6 +175,39 @@ def test_version_2_busy_and_idle_times(tmp_path):
     conn.close()
     w = OpencodeWatcher(home, fake_proc(tmp_path), now=Clock())
     assert [s.name for s in w.working()] == ["busy"]
+
+
+def add_v2_session(db, title, busy_ago, idle=False):
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS session_v2 (id TEXT, title TEXT, directory TEXT, "
+        "time_busy INT, time_idle INT)"
+    )
+    busy = int((NOW - busy_ago) * 1000)
+    conn.execute(
+        "INSERT INTO session_v2 VALUES (?, ?, '/work/app', ?, ?)",
+        (title, title, busy, busy + 1 if idle else None),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_a_migrated_database_is_read_for_both_versions(tmp_path):
+    """2.x keeps 1.x's tables beside its own; either version may be running."""
+    home = tmp_path / "data"
+    v1_db(home, [("assistant", False, 5)])
+    add_v2_session(home / "opencode.db", "v2 run", 5)
+    w = OpencodeWatcher(home, fake_proc(tmp_path), now=Clock())
+    assert sorted(s.name for s in w.working()) == ["fix the tests", "v2 run"]
+
+
+def test_a_channel_database_is_read(tmp_path):
+    home = tmp_path / "data"
+    home.mkdir()
+    add_v2_session(home / "opencode-beta.db", "beta run", 5)
+    w = OpencodeWatcher(home, fake_proc(tmp_path), now=Clock())
+    assert w.available()
+    assert [s.name for s in w.working()] == ["beta run"]
 
 
 def test_available_follows_the_database(tmp_path):

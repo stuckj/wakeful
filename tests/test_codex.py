@@ -186,3 +186,9 @@ def test_a_turn_begun_by_the_lock_holder_is_working(tmp_path):
     w = home_with(tmp_path, ["task_started"])
     holder_started(tmp_path / "proc", TURN_AT - 60)
     assert len(w.working()) == 1
+
+
+def test_a_clock_step_after_the_holder_started_does_not_drop_its_turn(tmp_path):
+    w = home_with(tmp_path, ["task_started"])
+    holder_started(tmp_path / "proc", TURN_AT + 5)  # boot time moved by an NTP step
+    assert len(w.working()) == 1

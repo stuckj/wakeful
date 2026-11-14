@@ -88,7 +88,9 @@ def opencode_processes(proc: Path = Path("/proc")) -> list[Process]:
         try:
             # An upgraded binary shows as "/path/opencode.exe (deleted)".
             exe = os.readlink(entry / "exe").removesuffix(" (deleted)")
-            if Path(exe).name not in BINARIES:
+            # nixpkgs wraps it, so the binary runs as ".opencode-wrapped".
+            name = Path(exe).name.removeprefix(".").removesuffix("-wrapped")
+            if name not in BINARIES:
                 continue
             cwd = os.readlink(entry / "cwd")
             args = (entry / "cmdline").read_bytes().split(b"\0")[1:]

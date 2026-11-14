@@ -44,9 +44,10 @@ class AgentWatcher(Protocol):
         """Its sessions that are working now. May raise; the caller treats that as none."""
 
 
-CLOCK_SLACK = 2.0
+CLOCK_SLACK = 30.0
 """Seconds of disagreement allowed between a process's start time, derived from
-the boot time, and the wall-clock times an agent records."""
+the boot time, and the wall-clock times an agent records. /proc/stat's boot
+time moves when the clock is stepped, as NTP does soon after boot."""
 
 
 def boot_time(proc: Path = Path("/proc")) -> float:

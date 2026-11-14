@@ -92,6 +92,11 @@ def test_another_program_in_that_directory_does_not_count(watcher):
     assert watcher([("assistant", False, 5)], exe="/usr/bin/bash").working() == ()
 
 
+def test_the_nixpkgs_wrapped_binary_counts(watcher):
+    exe = "/nix/store/abc-opencode-1.19.5/bin/.opencode-wrapped"
+    assert len(watcher([("assistant", False, 5)], exe=exe).working()) == 1
+
+
 def test_an_upgraded_binary_still_counts(watcher):
     exe = "/usr/lib/opencode-ai/bin/opencode.exe (deleted)"
     assert len(watcher([("assistant", False, 5)], exe=exe).working()) == 1

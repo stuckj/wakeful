@@ -155,9 +155,9 @@ class CodexWatcher:
         self._confirmed: set[tuple[int, int]] = set()
         """(inode, pid) pairs already seen holding a lock file open."""
         self._scans: dict[Path, tuple[int, int, TurnEvent | None]] = {}
+        """Per rollout: its inode, how far it has been read, and the last turn event."""
         self._missed: dict[str, float] = {}
         """When a full search last found no rollout for a thread, by time.monotonic()."""
-        """Per rollout: its inode, how far it has been read, and the last turn event."""
 
     def available(self) -> bool:
         return any((self.home / n).exists() for n in ("sessions", "config.toml", "auth.json"))

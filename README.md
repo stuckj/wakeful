@@ -2,18 +2,18 @@
 
 [![CI](https://github.com/stuckj/wakeful/actions/workflows/ci.yml/badge.svg)](https://github.com/stuckj/wakeful/actions/workflows/ci.yml)
 
-A tray app for KDE Plasma 6 that keeps the computer awake for a set time — sleep only, or with the screen on too — then releases the block by itself, and leaves nothing behind if it crashes. Packaged for apt, dnf and Nix.
+A tray app for KDE Plasma 6 that keeps the computer awake for a set time, or while a coding agent (Claude Code, Codex, opencode) is working — sleep only, or with the screen on too — then releases the block by itself, and leaves nothing behind if it crashes. Packaged for apt, dnf and Nix.
 
 Plasma's own "Manually block sleep and screen locking" switch has no time limit and always keeps the screen on and unlocked too. Tools such as caffeine-ng don't combine a time limit with blocking sleep alone. Wakeful does both: a block lasts 30 minutes, a few hours, or until you turn it off, and by default only sleep is blocked, so the screen still dims, turns off and locks on its usual timers.
 
 ## Features
 
-- **Timed blocks** — 30 minutes, 1, 2 or 4 hours, any custom length, until turned off, or while Claude Code is working. Add time to a running block, or turn it off early.
+- **Timed blocks** — 30 minutes, 1, 2 or 4 hours, any custom length, or until turned off. Add time to a running block, or stop it early.
+- **Agentic checks** — keep awake while Claude Code, Codex or opencode is working, alongside a timer or on their own, and see in the menu which sessions are — see [Coding agents](#coding-agents).
 - **Two modes** — *Keep awake, screen can turn off* (the default) blocks idle sleep only. *Keep awake and screen on* also blocks dimming, screen-off and screen locking.
 - **Nothing left behind** — the block ends when the time runs out, when you turn it off, and when Wakeful exits or crashes.
 - **Visible where you expect it** — the icon shows whether a block is keeping the computer awake and in which mode; the tooltip shows the time left; the battery applet lists Wakeful among the applications blocking sleep, with the reason *Keeping awake: 47 min left*.
 - **Optionally ignore closing the lid** (off by default) — see [Closing the lid](#closing-the-lid).
-- **Claude Code aware** — keep awake for as long as a Claude Code session is working, and see in the menu which sessions are — see [Claude Code](#claude-code).
 - **A command line** to drive the running tray, for scripts and keyboard shortcuts.
 - A notification when time runs out (can be turned off), and *Start at login*.
 
@@ -75,10 +75,16 @@ PyQt6 comes from your distribution: `python3-pyqt6` and `qt6-svg-plugins` on Deb
 
 Run `wakeful` (or start it from the application menu) and an icon appears in the system tray:
 
-- **Left-click** starts a block of the length you last used (an hour, the first time), or turns a running block off.
-- **Right-click** opens the menu: *Keep awake for* a preset or custom length, *Add time*, *Turn off*, the mode, and the options.
+- **Right-click** opens the menu: *Keep awake for* a preset or custom length, or the agentic checks below them; *Add time* and *Stop the timer*; the mode; and the options.
+- **Left-click** steps through three settings: off → agentic checks → agentic checks and a timer of the length you last used (an hour, the first time) → off. Turning off keeps which agents are ticked, so the next click watches the same ones. With no agent ticked, a click just starts or stops the timer.
 
-The icon is a closed grey eye while sleep is allowed, an open orange eye while a block keeps the computer awake, and an open eye with rays when the screen is kept on too.
+The icon has three states:
+
+| Icon | Meaning |
+| --- | --- |
+| Closed grey eye | Nothing is enabled: sleep is allowed. |
+| Half-lidded orange eye | Agentic checks are on but no agent is working and no timer runs: sleep is allowed. |
+| Open orange eye | The computer is being kept awake, by the timer or by a working agent. With rays when the screen is kept on too. |
 
 From a terminal, or bound to a key under *System Settings → Keyboard → Shortcuts → Add New → Command or Script*:
 
@@ -86,10 +92,11 @@ From a terminal, or bound to a key under *System Settings → Keyboard → Short
 wakeful start 1h            # keep awake for an hour; the screen may still turn off
 wakeful start --screen 90   # 90 minutes, screen kept on
 wakeful start               # until stopped
-wakeful start claude        # while a Claude Code session is working
 wakeful extend 30m
+wakeful stop                # stop the timer; agentic checks carry on
+wakeful agents on           # agentic checks on (off to turn them off)
+wakeful agents codex off    # untick one agent: claude, codex or opencode
 wakeful status
-wakeful stop
 ```
 
 These talk to the running tray, so it must be running first.
@@ -116,7 +123,7 @@ busctl --user get-property org.kde.Solid.PowerManagement /org/kde/Solid/PowerMan
 
 ## Closing the lid
 
-Closing the lid is an explicit request to sleep, and Plasma ignores every application's block when it happens. With the option *Also ignore closing the lid* on (it is off by default), Wakeful instead changes Plasma's lid setting — *System Settings → Power Management → When laptop lid closed* — to *Do nothing* for every power profile while a block keeps the computer awake, and puts it back when it stops: when the block ends, or, for a block that lasts while Claude is working, once Claude has stopped (see [Claude Code](#claude-code)).
+Closing the lid is an explicit request to sleep, and Plasma ignores every application's block when it happens. With the option *Also ignore closing the lid* on (it is off by default), Wakeful instead changes Plasma's lid setting — *System Settings → Power Management → When laptop lid closed* — to *Do nothing* for every power profile while a block keeps the computer awake, and puts it back when it stops: when the timer ends, or, for the agentic checks, once agents have stopped working (see [Coding agents](#coding-agents)).
 
 Because that is a saved setting rather than a block that dies with the app, Wakeful takes care to put it back:
 
@@ -127,17 +134,29 @@ Because that is a saved setting rather than a block that dies with the app, Wake
 
 While it is on, a laptop closed and put in a bag stays awake for as long as the block keeps it awake.
 
-## Claude Code
+## Coding agents
 
-*Keep awake for → While Claude is working* (or `wakeful start claude`) starts a block that runs until you turn it off, and keeps the computer awake only while any [Claude Code](https://claude.com/claude-code) session of yours on this computer is working, and for a minute after the last one stops, so a pause between two turns does not count. The rest of the time it holds nothing: the computer dims, locks and sleeps on its usual timers, and the icon shows sleep as allowed. It does not matter whether Claude is working when you start it. It is offered when `~/.claude` exists (or `$CLAUDE_CONFIG_DIR`, if that is set in the environment Wakeful itself was started in). It keeps the mode chosen in the menu, and with the lid option on, closing the lid is ignored only while Claude is keeping the computer awake.
+Below the timer choices in *Keep awake for* are the agentic checks: *Agentic checks enabled*, and a checkmark for each agent Wakeful knows — [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex) and [opencode](https://opencode.ai). An agent that is not installed is shown greyed out, and the agents are greyed out while *Agentic checks enabled* is off; turning it off keeps which ones are ticked.
 
-A session counts as working while it is running a turn, including any subagents, and while a shell it started is still running after the turn has ended, even one that is only waiting. A session sitting at its prompt, or waiting for you to answer a question or approve a command, does not.
+While agentic checks are on, Wakeful keeps the computer awake while any ticked agent of yours on this computer is working, and for a minute after the last one stops, so a pause between two turns does not count. The rest of the time they hold nothing: the computer dims, locks and sleeps on its usual timers, and the icon is the half-lidded eye. They are never turned off for you — not when the computer sleeps, not when a timer ends — and they are remembered when Wakeful restarts. A timer can run at the same time; the computer is kept awake while either wants it. Both use the mode chosen in the menu, and with the lid option on, closing the lid is ignored only while something is keeping the computer awake.
 
-While any block runs, whatever its length, the menu has a *Claude is working (N)* submenu listing each working session by name and whether it is working or running a shell; `wakeful status` lists them too. For a block that lasts while Claude works, the battery applet shows *Claude is working:* followed by the names.
+An agent counts as working while it is running a turn: thinking, running a tool or shell, or running a sub-agent. A session sitting at its prompt does not.
 
-Wakeful finds out by reading the files Claude Code keeps for each running process in `~/.claude/sessions`, every five seconds while a block runs. A file left behind by a process that has gone, or whose process number has been reused, is ignored. These files are Claude Code's own and not a documented interface, so a future Claude Code release could change them, and Wakeful would stop seeing sessions until it catches up.
+While the computer is kept awake, the menu has an *Agents working (N)* submenu listing each working session by agent and name; `wakeful status` lists them too. When the agents are the only reason, the battery applet shows *Agents working:* followed by the names.
 
-A background shell that never ends, such as a forgotten `tail -f`, keeps the computer awake until it is stopped. The submenu shows which session has it.
+How each agent is read, every five seconds while it matters (agentic checks on, or a timer running):
+
+| Agent | Working when | Ignored when | Notes |
+| --- | --- | --- | --- |
+| Claude Code | its file in `~/.claude/sessions` says it is busy, or running a shell after the turn | the process is gone, or its number was reused | A session waiting for you to approve a command does not count. `$CLAUDE_CONFIG_DIR` is honoured if set in the environment Wakeful was started in. |
+| Codex | the last turn event in its rollout file under `~/.codex/sessions` is a start | no process holds the thread's lock in `~/.codex/thread-writer-locks` | A turn waiting for your approval counts as working. `$CODEX_HOME` is honoured as above. |
+| opencode | its database (`~/.local/share/opencode/opencode.db`, opened read-only) has an unfinished step | no opencode process runs in the session's directory, or the step is over three hours old | Waiting for your approval counts as working. The database is queried only when it has changed. |
+
+None of these are documented interfaces, so a future release of an agent could change them, and Wakeful would stop seeing its sessions until it catches up.
+
+A background shell or tool that never ends, such as a forgotten `tail -f`, keeps the computer awake until it is stopped. The submenu shows which session has it.
+
+The checks cost little: reading Claude Code's few small files takes under a millisecond, opencode's database is only queried when it has changed, and Wakeful already wakes every five seconds whether or not anything is checked.
 
 ## Documentation
 

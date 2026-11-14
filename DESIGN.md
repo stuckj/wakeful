@@ -41,12 +41,15 @@ block.py     the block and its timing rules; no Qt, no D-Bus
 inhibit.py   holds the inhibitions over D-Bus
 lid.py       lid setting: journal, change, restore; no Qt
 lidwatch.py  watchdog process that restores the lid if the main process dies
+agents.py    what a coding agent watcher reports; no Qt
 claude.py    which Claude Code sessions are working; no Qt
+codex.py     which Codex threads are working; no Qt
+opencode.py  which opencode sessions are working; no Qt
 ```
 
-Dependencies point downwards. `block.py`, `controller.py`, `lid.py` and `claude.py` know nothing
-of Qt or D-Bus; the controller sees the inhibitor, the lid guard and the Claude Code watcher only
-through small protocols. That is
+Dependencies point downwards. `block.py`, `controller.py`, `lid.py` and the agent watchers know
+nothing of Qt or D-Bus; the controller sees the inhibitor, the lid guard and the agent watchers
+only through small protocols. That is
 what lets the timer and lid rules be tested without a bus.
 
 The tray and the D-Bus control interface are two front ends to one controller. Neither keeps
@@ -109,30 +112,27 @@ What it does not do: it does not cover a reboot during a block unless Wakeful st
 afterwards (hence *Start at login*), and it does not change the separate "when an external
 monitor is connected" lid rule.
 
-## Following Claude Code
+## Coding agents
 
-"While Claude is working" is a length of block, like "until turned off": it has no end time and
-runs until the user turns it off. Unlike other blocks it does not hold all the time. The
-controller holds its inhibition, and engages the lid, only while a session is working and for a
-grace period after, and releases both in between, so the session's own idle timers decide when
-an idle computer sleeps. Its mode and the single inhibition are an ordinary block's, so Claude
-activity adds no second path to holding or releasing anything.
+The controller has two independent reasons to hold: the timer, and the agentic checks. It holds
+one inhibition while either wants it, in the timer's mode while there is a timer and in the
+chosen mode otherwise, and the lid follows that inhibition. The agentic checks are standing
+settings, not a block: they want the inhibition only while a ticked agent is working and for a
+grace period after, and between times hold nothing, so the session's own idle timers decide when
+an idle computer sleeps. They are switched only by the user.
 
-While any block runs, the controller reads which sessions are working on each tick so the tray
-and `Status` can show them. With no block it reads nothing.
-
-Claude Code is observed, not told. Wakeful reads the per-process files Claude Code already
-writes and checks each against the live process, on the controller's existing tick. Hooks were
-the alternative: documented, but they need the user to edit Claude Code's settings, they do not
-report a shell left running after a turn, and a hook that announced work and then died would
-leave Wakeful holding for a process that is gone. Reading the files costs a dependency on a
-format Claude Code does not document; `claude.py` is the only place that knows it.
+The agents are observed, not told. Each watcher reads what its agent already writes for itself
+(a per-process file, a log of turn events, a database) and checks it against the live process,
+on the controller's existing tick, and only while the result could matter. Hooks or plugins in
+each agent were the alternative: some documented, but each needs the user to configure that
+agent, and one that announced work and then died would leave Wakeful holding for a process that
+is gone. Reading costs a dependency on formats the agents do not document; each watcher module
+is the only place that knows its agent's.
 
 ## What Wakeful deliberately does not do
 
 - Hold anything that persists, other than the lid setting under the journal above.
-- Install anything into Claude Code, or keep the computer awake for a Claude Code session that
-  is waiting on the user.
+- Install anything into a coding agent, or write to anything an agent owns.
 - Talk to logind, or need any privilege.
 - Support desktops other than Plasma. The freedesktop interfaces exist elsewhere, but the
   verification and the lid handling are Plasma-specific.

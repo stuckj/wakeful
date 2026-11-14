@@ -32,15 +32,23 @@ Checked against the Plasma/6.6 sources of powerdevil and kscreenlocker:
 
 The stub in `tests/integration/stub_services.py` mirrors these; keep it in step if they change.
 
-## Facts about Claude Code that the code relies on
+## Facts about the coding agents that the code relies on
 
-Checked against Claude Code 2.1.302 on Linux; `src/wakeful/claude.py` documents the fields it reads.
+None of these is a documented interface. Each watcher module's docstring documents what it reads.
 
-- `~/.claude/sessions/<pid>.json` (under `$CLAUDE_CONFIG_DIR` when set) exists per running
-  process. `status` is `busy`, `shell`, `idle` or `waiting`; it reads `shell` after a turn ends
-  while a background shell still runs, and `busy` while an in-process subagent runs.
-- `procStart` is field 22 of `/proc/<pid>/stat`; `pidDomain` is
-  `linux:<machine-id>:pid:[<pid namespace>]`.
+- **Claude Code**, checked by running 2.1.302 on Linux. `~/.claude/sessions/<pid>.json` (under
+  `$CLAUDE_CONFIG_DIR` when set) exists per running process. `status` is `busy`, `shell`, `idle`
+  or `waiting`; it reads `shell` after a turn ends while a background shell still runs, and
+  `busy` while an in-process subagent runs. `procStart` is field 22 of `/proc/<pid>/stat`;
+  `pidDomain` is `linux:<machine-id>:pid:[<pid namespace>]`.
+- **Codex**, read from source (openai/codex `rust-v0.169.0`), not yet seen running.
+  `codex-rs/rollout/src/policy.rs` always persists `task_started`, `task_complete` and
+  `turn_aborted`; `codex-rs/rollout/src/writer_lock.rs` flocks
+  `thread-writer-locks/<thread>.lock` while a thread is open. Approval waits are not persisted.
+- **opencode**, schema checked against an installed 1.19.3; behaviour read from source at
+  `v1.19.3` and `v2.3.0`. 1.x writes an assistant message without `time.completed` when a step
+  starts (`session/processor.ts`); streaming writes nothing. 2.x has `session_v2.time_busy` and
+  `time_idle`. Neither records a pid, and the database also holds credentials.
 
 ## Surfaces that must stay in sync
 

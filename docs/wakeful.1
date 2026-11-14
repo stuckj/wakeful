@@ -1,6 +1,6 @@
 .TH WAKEFUL 1 "2026" "wakeful" "User Commands"
 .SH NAME
-wakeful \- keep a KDE Plasma session awake for a set time
+wakeful \- keep a Plasma session awake for a time or while coding agents work
 .SH SYNOPSIS
 .B wakeful
 [\fB\-\-no\-tray\fR] [\fB\-v\fR]
@@ -13,28 +13,39 @@ wakeful \- keep a KDE Plasma session awake for a set time
 .br
 .B wakeful stop
 .br
+.B wakeful agents
+[\fBon\fR|\fBoff\fR | \fIAGENT\fR \fBon\fR|\fBoff\fR]
+.br
 .B wakeful status
 .SH DESCRIPTION
 With no command,
 .B wakeful
-puts an icon in the system tray. From its menu a block can be started for a
-preset length, a custom length, until it is turned off, or while Claude Code
-is working (see
-.B CLAUDE CODE
-below), then extended or
-turned off. Left\-clicking the icon starts a block of the last length used, or
-turns a running one off. The tooltip shows the time remaining.
+puts an icon in the system tray. Two things can keep the computer awake, on
+their own or together: a timer, started from the menu for a preset length, a
+custom length, or until it is turned off, then extended or stopped; and the
+agentic checks, which keep it awake while a coding agent is working (see
+.B CODING AGENTS
+below).
 .PP
-A block is released when its time runs out, when it is turned off, and when
+The icon is a closed eye when nothing is enabled, a half\-lidded eye while the
+agentic checks are on but nothing is working and no timer runs, and an open eye
+while the computer is being kept awake. Left\-clicking it steps through off,
+agentic checks, and agentic checks with a timer of the last length used, then
+back to off. With no agent ticked the step for agentic checks is left out. The
+tooltip shows the time remaining.
+.PP
+The timer is released when its time runs out and when it is stopped; every
+inhibition is released when
 .B wakeful
-exits or crashes: the inhibitions are held on its own D\-Bus connection, and
-the session's power management drops them when that connection closes.
+exits or crashes: they are held on its own D\-Bus connection, and the session's
+power management drops them when that connection closes.
 .PP
 With a command,
 .B wakeful
 asks the running tray to act, which makes it usable from scripts and from a
 custom keyboard shortcut.
 .SH MODES
+The mode chosen in the menu applies to the timer and to the agentic checks.
 .TP
 .B Keep awake, screen can turn off
 The default. Idle sleep is blocked; the screen still dims, turns off and locks
@@ -46,68 +57,85 @@ org.freedesktop.ScreenSaver.Inhibit.
 .SH COMMANDS
 .TP
 \fBstart\fR [\fB\-\-screen\fR] [\fIDURATION\fR]
-Start a block, replacing any running one. Without a duration it lasts until
+Start a timer, replacing any running one. Without a duration it lasts until
 stopped. \fB\-\-screen\fR keeps the screen on too.
 .TP
 \fBextend\fR \fIDURATION\fR
-Add time to the running block.
+Add time to the running timer.
 .TP
 .B stop
-End the running block.
+Stop the timer. The agentic checks carry on.
 .TP
-.B status
-Print what is being kept awake and for how long, and, while a block runs, which
-Claude Code sessions are working.
+\fBagents\fR \fBon\fR|\fBoff\fR
+Turn the agentic checks on or off. Which agents are ticked is kept.
+.TP
+\fBagents\fR \fIAGENT\fR \fBon\fR|\fBoff\fR
+Tick or untick one agent: \fBclaude\fR, \fBcodex\fR or \fBopencode\fR.
+.TP
+.BR status ", " agents
+Print what is being kept awake and why, and which agent sessions are working.
 .PP
 \fIDURATION\fR is minutes as a bare number (\fB90\fR), or hours, minutes and
 seconds such as \fB1h30m\fR, \fB45m\fR or \fB20s\fR. \fBforever\fR means no end.
-\fBclaude\fR means while a Claude Code session is working.
 .SH OPTIONS
 .TP
 .B \-\-no\-tray
-Run without a tray icon, controlled only through the commands above.
+Run without a tray icon, controlled only through the commands above. The agentic
+checks then start off and are not remembered.
 .TP
 .BR \-v ", " \-\-verbose
 Log debug detail to standard error.
 .TP
 .B \-\-version
 Print the version and exit.
+.SH CODING AGENTS
+The agentic checks are below the timer choices in the tray's \fBKeep awake
+for\fR menu: \fBAgentic checks enabled\fR, and a checkmark for each of Claude
+Code, Codex and opencode. While they are on, the computer is kept awake while
+any ticked agent of the same user on this computer is running a turn, and for a
+minute after the last one stops; the rest of the time they hold nothing and the
+computer sleeps on its usual timers. They are never turned off for you, and
+they are remembered across restarts. An agent sitting at its prompt does not
+count. The working sessions are listed in the tray menu and by
+\fBwakeful status\fR.
+.PP
+Each agent is read every five seconds while it matters, from files it keeps for
+itself; none of them is a documented interface:
+.TP
+.B Claude Code
+\fI$CLAUDE_CONFIG_DIR/sessions/*.json\fR (default \fI~/.claude/sessions\fR):
+working while a session is busy or still running a shell after its turn. A
+session waiting for an answer does not count, nor one whose process has gone.
+.TP
+.B Codex
+\fI$CODEX_HOME/sessions/**/rollout\-*.jsonl\fR (default \fI~/.codex\fR):
+working while the last turn event is a start and a process holds the thread's
+lock in \fI$CODEX_HOME/thread\-writer\-locks\fR. Waiting for approval counts.
+.TP
+.B opencode
+\fI$XDG_DATA_HOME/opencode/opencode.db\fR, opened read\-only: working while it
+has an unfinished step under three hours old and an opencode process runs in
+that session's directory. Waiting for approval counts.
+.PP
+\fBCLAUDE_CONFIG_DIR\fR, \fBCODEX_HOME\fR and \fBXDG_DATA_HOME\fR are taken from
+the environment of the running tray, not of the shell that runs a command.
 .SH CLOSING THE LID
 Closing the lid is an explicit request to sleep, and no inhibition stops it.
 The tray's \fBAlso ignore closing the lid\fR option instead sets the lid action
-in \fI~/.config/powerdevilrc\fR to "Do nothing" for every power profile while a
-block keeps the computer awake, and puts the previous values back when it stops
-(see
-.B CLAUDE CODE
-for a block that keeps it awake only while Claude works). The previous values
-are written to \fI$XDG_STATE_HOME/wakeful/lid\-restore.json\fR before anything
-is changed. If
+in \fI~/.config/powerdevilrc\fR to "Do nothing" for every power profile while
+the computer is being kept awake, by the timer or by working agents, and puts
+the previous values back when it stops. The previous values are written to
+\fI$XDG_STATE_HOME/wakeful/lid\-restore.json\fR before anything is changed. If
 .B wakeful
 is killed, a watchdog process restores them; if the watchdog is also gone (for
 example after a reboot), the next start of
 .B wakeful
-restores them. A value changed in System Settings during the block is left as
+restores them. A value changed in System Settings in the meantime is left as
 it is.
-.SH CLAUDE CODE
-A block started with \fBWhile Claude is working\fR (or \fBwakeful start
-claude\fR) runs until it is turned off, but keeps the computer awake only while
-any Claude Code session of the same user on this computer is running a turn or
-still has a shell running, and for a minute after the last one stops. The rest
-of the time it holds nothing and the computer sleeps on its usual timers; the
-lid option, too, applies only while it is keeping the computer awake. Sessions
-at their prompt, or waiting for an answer, do not count. It is offered only
-when the Claude Code configuration directory exists.
-.PP
-While any block runs, the working sessions are listed in the tray menu and by
-\fBwakeful status\fR. They are read from the files Claude Code keeps in
-\fI$CLAUDE_CONFIG_DIR/sessions\fR (default \fI~/.claude/sessions\fR), every
-five seconds; a file whose process has gone is ignored. \fBCLAUDE_CONFIG_DIR\fR
-is taken from the environment of the running tray, not of the shell that runs
-\fBwakeful start\fR.
 .SH FILES
 .TP
 .I ~/.config/wakeful/wakeful.conf
-Preferences: mode, last length, lid option, notifications.
+Preferences: mode, last length, lid option, agentic checks, notifications.
 .TP
 .I ~/.config/autostart/wakeful.desktop
 Present when "Start at login" is on.
@@ -116,7 +144,7 @@ Present when "Start at login" is on.
 The lid values to restore; present only while the lid is being ignored.
 .SH EXIT STATUS
 0 on success. 1 when the tray is not running or refused the command. 2 for a
-duration that cannot be parsed.
+duration or switch that cannot be parsed.
 .SH SEE ALSO
 .BR systemd\-inhibit (1)
 .PP

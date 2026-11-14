@@ -6,6 +6,7 @@ which of its sessions are working right now; the controller polls them.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -41,6 +42,26 @@ class AgentWatcher(Protocol):
 
     def working(self) -> tuple[AgentSession, ...]:
         """Its sessions that are working now. May raise; the caller treats that as none."""
+
+
+CLOCK_SLACK = 2.0
+"""Seconds of disagreement allowed between a process's start time, derived from
+the boot time, and the wall-clock times an agent records."""
+
+
+def boot_time(proc: Path = Path("/proc")) -> float:
+    for line in (proc / "stat").read_text().splitlines():
+        if line.startswith("btime "):
+            return float(line.split()[1])
+    raise OSError("no btime in /proc/stat")
+
+
+def started_at(pid: int, proc: Path = Path("/proc")) -> float | None:
+    """When pid started, in seconds since the epoch, or None if it is gone."""
+    ticks = proc_start(pid, proc)
+    if ticks is None:
+        return None
+    return boot_time(proc) + ticks / os.sysconf("SC_CLK_TCK")
 
 
 def proc_start(pid: int, proc: Path = Path("/proc")) -> int | None:

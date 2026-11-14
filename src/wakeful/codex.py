@@ -22,13 +22,17 @@ from __future__ import annotations
 import json
 import os
 import time
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
-from .agents import AgentSession
+from .agents import CLOCK_SLACK, AgentSession, started_at
 
 STARTED = {"task_started", "turn_started"}
 ENDED = {"task_complete", "turn_complete", "turn_aborted"}
 TAIL_CHUNK = 64 * 1024
+META_MAX = 4 * 1024 * 1024
+"""The longest first line (session_meta, with its instructions) read for a cwd."""
 
 
 def codex_home() -> Path:
@@ -69,7 +73,14 @@ def has_open(proc: Path, pid: int, st: os.stat_result) -> bool:
     return False
 
 
-def last_turn_event(path: Path, start: int = 0) -> tuple[str | None, int]:
+@dataclass(frozen=True)
+class TurnEvent:
+    kind: str
+    at: float | None
+    """When it was written, in seconds since the epoch, if the line says."""
+
+
+def last_turn_event(path: Path, start: int = 0) -> tuple[TurnEvent | None, int]:
     """The last turn start or end event among the complete lines from byte start on,
     read from the end, and the offset where those complete lines end."""
     with path.open("rb") as f:
@@ -104,7 +115,7 @@ def _mtime(path: Path) -> int:
         return -1
 
 
-def _turn_event(line: bytes) -> str | None:
+def _turn_event(line: bytes) -> TurnEvent | None:
     if b"task_" not in line and b"turn_" not in line:
         return None
     try:
@@ -115,7 +126,19 @@ def _turn_event(line: bytes) -> str | None:
         return None
     payload = event.get("payload")
     kind = payload.get("type") if isinstance(payload, dict) else None
-    return kind if kind in STARTED or kind in ENDED else None
+    if kind not in STARTED and kind not in ENDED:
+        return None
+    return TurnEvent(kind, _timestamp(event.get("timestamp")))
+
+
+def _timestamp(value: object) -> float | None:
+    """Seconds since the epoch from an ISO 8601 time such as 2026-11-14T20:21:23.456Z."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
 
 
 class CodexWatcher:
@@ -129,7 +152,7 @@ class CodexWatcher:
         self._cwds: dict[Path, str] = {}
         self._confirmed: set[tuple[int, int]] = set()
         """(inode, pid) pairs already seen holding a lock file open."""
-        self._scans: dict[Path, tuple[int, int, str | None]] = {}
+        self._scans: dict[Path, tuple[int, int, TurnEvent | None]] = {}
         """Per rollout: its inode, how far it has been read, and the last turn event."""
 
     def available(self) -> bool:
@@ -159,16 +182,23 @@ class CodexWatcher:
             if rollout is None:
                 continue
             try:
-                if self._turn(rollout) not in STARTED:
-                    continue
+                turn = self._turn(rollout)
             except OSError:
+                continue
+            if turn is None or turn.kind not in STARTED:
+                continue
+            # A turn begun before the lock's holder started was abandoned by an
+            # earlier process; resuming the thread does not end it in the rollout.
+            holder_start = started_at(pid, self._proc)
+            known = turn.at is not None and holder_start is not None
+            if known and turn.at < holder_start - CLOCK_SLACK:
                 continue
             cwd = self._cwd(rollout)
             name = Path(cwd).name if cwd else lock.stem[:8]
             found.append(AgentSession(self.label, pid, name, "working", cwd))
         return tuple(found)
 
-    def _turn(self, rollout: Path) -> str | None:
+    def _turn(self, rollout: Path) -> TurnEvent | None:
         """The last turn event in rollout, reading only what was appended since last time."""
         st = rollout.stat()
         scanned = self._scans.get(rollout)
@@ -217,7 +247,7 @@ class CodexWatcher:
             cwd = ""
             try:
                 with rollout.open("rb") as f:
-                    first = json.loads(f.readline(TAIL_CHUNK))
+                    first = json.loads(f.readline(META_MAX))
                 payload = first.get("payload") if isinstance(first, dict) else None
                 if isinstance(payload, dict) and isinstance(payload.get("cwd"), str):
                     cwd = payload["cwd"]

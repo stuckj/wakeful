@@ -31,13 +31,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .agents import AgentSession, proc_start
+from .agents import CLOCK_SLACK, AgentSession, boot_time, proc_start
 
 REQUERY_AFTER = 60
+RESCAN_AFTER = 30
+"""Seconds between walks of /proc for new opencode processes; in between, only
+the ones already found are checked."""
 BINARIES = {"opencode", "opencode.exe"}
-CLOCK_SLACK = 2.0
-"""Seconds of disagreement allowed between a process's start time, derived from
-the boot time, and the wall-clock times opencode records."""
 
 SILENT_FOR = 2 * 3600
 """Seconds without any write to a 1.x session after which its unfinished step is
@@ -71,13 +71,6 @@ class Process:
 def data_dir() -> Path:
     base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
     return Path(base) / "opencode"
-
-
-def boot_time(proc: Path = Path("/proc")) -> float:
-    for line in (proc / "stat").read_text().splitlines():
-        if line.startswith("btime "):
-            return float(line.split()[1])
-    raise OSError("no btime in /proc/stat")
 
 
 def opencode_processes(proc: Path = Path("/proc")) -> list[Process]:
@@ -140,6 +133,8 @@ class OpencodeWatcher:
         self._key: tuple = ()
         self._queried_at = float("-inf")
         self._busy: list[tuple[str, str, str, float, float | None]] = []
+        self._procs: list[Process] = []
+        self._scanned_at = float("-inf")
 
     def databases(self) -> list[Path]:
         """opencode.db, and the per-channel opencode-<channel>.db of 2.x builds."""
@@ -152,7 +147,7 @@ class OpencodeWatcher:
         return bool(self.databases())
 
     def working(self) -> tuple[AgentSession, ...]:
-        procs = opencode_processes(self._proc)
+        procs = self._processes()
         if not procs:
             return ()
         since = min(p.started for p in procs) - CLOCK_SLACK
@@ -176,6 +171,15 @@ class OpencodeWatcher:
                 name = title or Path(directory).name
                 found.append(AgentSession(self.label, owner.pid, name, "working", directory))
         return tuple(found)
+
+    def _processes(self) -> list[Process]:
+        """The opencode processes, walking /proc only every RESCAN_AFTER seconds or
+        when one already found has gone."""
+        gone = any(proc_start(p.pid, self._proc) is None for p in self._procs)
+        if gone or self._now() - self._scanned_at >= RESCAN_AFTER:
+            self._procs = opencode_processes(self._proc)
+            self._scanned_at = self._now()
+        return self._procs
 
     def _busy_sessions(
         self, db: Path, since: float

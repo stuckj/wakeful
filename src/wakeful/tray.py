@@ -205,7 +205,7 @@ class Tray(QObject):
         if self._lid_action.isVisible() and self._lid_action.isChecked() != status.ignore_lid:
             _set_checked(self._lid_action, status.ignore_lid)
         self._show_agents(status)
-        self._save_agents(status)
+        self._save_settings(status)
         self._show_sessions(status.sessions if status.held else ())
 
         if status.held:
@@ -241,8 +241,11 @@ class Tray(QObject):
             if action.isChecked() != (key in status.watched):
                 _set_checked(action, key in status.watched)
 
-    def _save_agents(self, status: Status) -> None:
-        """Keep the settings in step, including changes made over D-Bus."""
+    def _save_settings(self, status: Status) -> None:
+        """Keep the settings in step, including changes made over D-Bus. While a
+        timer runs, status.mode is the timer's, which need not be the chosen one."""
+        if not status.active and self._settings.mode is not status.mode:
+            self._settings.mode = status.mode
         if self._settings.agents_enabled != status.agents_enabled:
             self._settings.agents_enabled = status.agents_enabled
         for key in self._agent_actions:

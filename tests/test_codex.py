@@ -87,7 +87,8 @@ def test_last_turn_event_ignores_lines_that_only_mention_one(tmp_path):
     lines = [event("task_started"), {"type": "response_item", "payload": {"text": "task_complete"}}]
     complete = "".join(json.dumps(line) + "\n" for line in lines)
     path.write_text(complete + '{"half')
-    assert last_turn_event(path) == ("task_started", len(complete))
+    turn, end = last_turn_event(path)
+    assert (turn.kind, turn.at, end) == ("task_started", 1794650400.0, len(complete))
 
 
 def append(w, text):
@@ -161,3 +162,27 @@ def test_available_needs_more_than_an_empty_directory(tmp_path):
     assert not w.available()
     (tmp_path / "config.toml").touch()
     assert w.available()
+
+
+TURN_AT = 1794650400.0  # the "timestamp" event() writes: 2026-11-14T10:00:00Z
+BOOT = 1794600000
+
+
+def holder_started(proc, at):
+    """Give the fake lock holder, pid 4242, a start time in /proc."""
+    ticks = os.sysconf("SC_CLK_TCK")
+    (proc / "stat").write_text(f"cpu 1 2 3\nbtime {BOOT}\n")
+    fields = ["S"] + ["0"] * 18 + [str(int((at - BOOT) * ticks))] + ["0"] * 5
+    (proc / "4242" / "stat").write_text(f"4242 (codex) {' '.join(fields)}\n")
+
+
+def test_a_turn_abandoned_before_the_lock_holder_started_is_not_working(tmp_path):
+    w = home_with(tmp_path, ["task_started"])
+    holder_started(tmp_path / "proc", TURN_AT + 3600)  # resumed an hour after the crash
+    assert w.working() == ()
+
+
+def test_a_turn_begun_by_the_lock_holder_is_working(tmp_path):
+    w = home_with(tmp_path, ["task_started"])
+    holder_started(tmp_path / "proc", TURN_AT - 60)
+    assert len(w.working()) == 1

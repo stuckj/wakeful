@@ -150,15 +150,15 @@ How each agent is read, every five seconds while it matters (agentic checks on, 
 | --- | --- | --- | --- |
 | Claude Code | its file in `~/.claude/sessions` says it is busy, or running a shell after the turn | the process is gone, or its number was reused | A session waiting for you to approve a command does not count. `$CLAUDE_CONFIG_DIR` is honoured if set in the environment Wakeful was started in. |
 | Codex | the last turn event in its rollout file under `~/.codex/sessions` is a start | no process holds the thread's lock in `~/.codex/thread-writer-locks` | A turn waiting for your approval counts as working. `$CODEX_HOME` is honoured as above. |
-| opencode (1.x and 2.x) | its database (`~/.local/share/opencode/opencode.db`, or a 2.x build's `opencode-<channel>.db` or `$OPENCODE_DB`, opened read-only) has an unfinished step (1.x) or a run still busy (2.x) | no opencode process that started before the step runs in the session's directory or below it, as after a crash; or nothing has been written to the session for two hours | Waiting for your approval counts as working. The database is not opened while no opencode process runs; while one does, SQLite records each read in the database's shared-memory file, as any reader does. |
+| opencode (1.x and 2.x) | its database (`~/.local/share/opencode/opencode.db`, or a 2.x build's `opencode-<channel>.db` or `$OPENCODE_DB`, opened read-only) has an unfinished step (1.x) or a run still busy (2.x) | no opencode process that started before the step runs in the session's directory or below it, as after a crash; or, for 1.x, nothing has been written to the session for two hours | Waiting for your approval counts as working. The database is not opened while no opencode process runs; while one does, SQLite records each read in the database's shared-memory file, as any reader does. |
 
 None of these are documented interfaces, so a future release of an agent could change them, and Wakeful would stop seeing its sessions until it catches up.
 
 A background shell or tool that never ends, such as a forgotten `tail -f`, keeps the computer awake until it is stopped. The submenu shows which session has it.
 
-opencode records no process, so Wakeful has to guess which steps are live. If an opencode is killed in the middle of a step while an older opencode keeps running in the same directory, that step counts as working for up to two hours. The other way round, a single opencode step that writes nothing for more than two hours — one silent tool running that long — stops counting.
+opencode records no process, so Wakeful has to guess which steps are live. If an opencode is killed in the middle of a step while an older opencode keeps running in the same directory, that step counts as working — for up to two hours with 1.x, and with 2.x until the older opencode exits. The other way round, a single 1.x step that writes nothing for more than two hours — one silent tool running that long — stops counting. A newly started opencode can take up to 30 seconds to be noticed.
 
-The checks cost little: each agent's check takes a few hundred microseconds to under two milliseconds of CPU every five seconds — about a second of CPU an hour at most — and Wakeful already wakes every five seconds whether or not anything is checked.
+The checks cost little. Measured on a desktop-class machine, each agent's check takes 0.2–0.5 ms of CPU every five seconds, well under a second of CPU an hour; the opencode check also walks the process list every 30 seconds, at about 30 µs per process running. Wakeful already wakes every five seconds whether or not anything is checked.
 
 ## Documentation
 

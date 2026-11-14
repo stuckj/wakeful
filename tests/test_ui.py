@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QApplication, QSystemTrayIcon
 
 from wakeful import app as cli
 from wakeful.agents import AgentSession
+from wakeful.block import Mode
 from wakeful.controller import Controller
 from wakeful.tray import Settings, Tray
 
@@ -116,6 +117,16 @@ def test_agentic_checks_are_remembered(tray):
     _, again, _ = make()
     status = again.status()
     assert status.agents_enabled and "claude" not in status.watched
+
+
+def test_a_mode_chosen_over_d_bus_is_remembered_and_used_by_a_click(tray):
+    make, _ = tray
+    t, controller, inhibitor = make()
+    controller.set_watched("claude", False)
+    controller.set_mode(Mode.SCREEN)
+    assert Settings().mode is Mode.SCREEN
+    t._activated(CLICK)
+    assert controller.status().active and inhibitor.held[0] is Mode.SCREEN
 
 
 def test_agent_entries_are_greyed_while_agentic_checks_are_off(tray):

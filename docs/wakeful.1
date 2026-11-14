@@ -76,7 +76,10 @@ Print the version and exit.
 Closing the lid is an explicit request to sleep, and no inhibition stops it.
 The tray's \fBAlso ignore closing the lid\fR option instead sets the lid action
 in \fI~/.config/powerdevilrc\fR to "Do nothing" for every power profile while a
-block runs, and puts the previous values back when it ends. The previous values
+block keeps the computer awake, and puts the previous values back when it stops
+(see
+.B CLAUDE CODE
+for a block that keeps it awake only while Claude works). The previous values
 are written to \fI$XDG_STATE_HOME/wakeful/lid\-restore.json\fR before anything
 is changed. If
 .B wakeful

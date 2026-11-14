@@ -433,6 +433,16 @@ def test_lid_follows_claude_after_a_failed_start(claude_env):
     assert lid.engaged
 
 
+def test_grace_does_not_carry_over_from_a_stopped_block(claude_env):
+    c, inhibitor, _, _, claude, _ = claude_env
+    claude.sessions = [session("a")]
+    c.start(3600, Mode.SLEEP)
+    c.stop()
+    claude.sessions = []
+    c.start(None, Mode.SLEEP, while_claude=True)
+    assert inhibitor.held is None
+
+
 def test_a_failing_lid_change_is_not_retried_on_every_tick(claude_env):
     c, _, lid, clock, _, _ = claude_env
     c.ignore_lid = True

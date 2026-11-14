@@ -264,7 +264,7 @@ class Controller:
 
     def _end(self, why: str) -> None:
         ended = self._session.cancel()
-        self._claude = ()
+        self._claude, self._claude_seen_at = (), None
         self._inhibitor.release()
         self._sync_lid()
         if ended is not None:

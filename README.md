@@ -11,7 +11,7 @@ Plasma's own "Manually block sleep and screen locking" switch has no time limit 
 - **Timed blocks** — 30 minutes, 1, 2 or 4 hours, any custom length, until turned off, or while Claude Code is working. Add time to a running block, or turn it off early.
 - **Two modes** — *Keep awake, screen can turn off* (the default) blocks idle sleep only. *Keep awake and screen on* also blocks dimming, screen-off and screen locking.
 - **Nothing left behind** — the block ends when the time runs out, when you turn it off, and when Wakeful exits or crashes.
-- **Visible where you expect it** — the icon shows whether a block is active and which mode; the tooltip shows the time left; the battery applet lists Wakeful among the applications blocking sleep, with the reason *Keeping awake: 47 min left*.
+- **Visible where you expect it** — the icon shows whether a block is keeping the computer awake and in which mode; the tooltip shows the time left; the battery applet lists Wakeful among the applications blocking sleep, with the reason *Keeping awake: 47 min left*.
 - **Optionally ignore closing the lid** (off by default) — see [Closing the lid](#closing-the-lid).
 - **Claude Code aware** — keep awake for as long as a Claude Code session is working, and see in the menu which sessions are — see [Claude Code](#claude-code).
 - **A command line** to drive the running tray, for scripts and keyboard shortcuts.
@@ -116,16 +116,16 @@ busctl --user get-property org.kde.Solid.PowerManagement /org/kde/Solid/PowerMan
 
 ## Closing the lid
 
-Closing the lid is an explicit request to sleep, and Plasma ignores every application's block when it happens. With the option *Also ignore closing the lid* on (it is off by default), Wakeful instead changes Plasma's lid setting — *System Settings → Power Management → When laptop lid closed* — to *Do nothing* for every power profile while a block runs, and puts it back when the block ends.
+Closing the lid is an explicit request to sleep, and Plasma ignores every application's block when it happens. With the option *Also ignore closing the lid* on (it is off by default), Wakeful instead changes Plasma's lid setting — *System Settings → Power Management → When laptop lid closed* — to *Do nothing* for every power profile while a block keeps the computer awake, and puts it back when it stops: when the block ends, or, for a block that lasts while Claude is working, once Claude has stopped (see [Claude Code](#claude-code)).
 
 Because that is a saved setting rather than a block that dies with the app, Wakeful takes care to put it back:
 
 - The previous values are written to `~/.local/state/wakeful/lid-restore.json` **before** anything is changed.
-- When the block ends, each value is put back — unless you changed it in System Settings meanwhile, in which case your change is kept.
+- When the block stops keeping the computer awake, each value is put back — unless you changed it in System Settings meanwhile, in which case your change is kept.
 - If Wakeful is killed or crashes, a small watchdog process it started puts the values back straight away.
 - If both are gone (a power cut, or a reboot during the block), the next start of Wakeful puts them back. Turn on *Start at login* if you use this option.
 
-While it is on, a laptop closed and put in a bag stays awake until the block ends.
+While it is on, a laptop closed and put in a bag stays awake for as long as the block keeps it awake.
 
 ## Claude Code
 

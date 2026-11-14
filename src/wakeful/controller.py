@@ -163,7 +163,7 @@ class Controller:
         if while_claude and not self.claude_available:
             raise RuntimeError("Claude Code was not found")
         sessions = self._read_claude()
-        previous = self._session.block, self._claude, self._claude_seen_at
+        previous = self._session.block, self._claude, self._claude_seen_at, self._held
         self._session.start(duration, mode, self._now(), while_claude)
         self._claude = sessions
         if sessions:
@@ -171,7 +171,7 @@ class Controller:
         try:
             self._apply()
         except Exception:
-            self._session.block, self._claude, self._claude_seen_at = previous
+            self._session.block, self._claude, self._claude_seen_at, self._held = previous
             if self._session.block is None:
                 self._inhibitor.release()
             self._sync_lid()
@@ -219,7 +219,7 @@ class Controller:
             self._apply()
         except Exception as e:
             log.warning("could not refresh the inhibition: %s", e)
-        if self._holding() != was_holding:
+        if self._held != was_holding:
             self._sync_lid()
         self._changed()
 

@@ -419,6 +419,20 @@ def test_restarting_a_while_claude_block_keeps_its_grace(claude_env):
     assert inhibitor.held is None
 
 
+def test_lid_follows_claude_after_a_failed_start(claude_env):
+    c, inhibitor, lid, _, claude, _ = claude_env
+    c.ignore_lid = True
+    c.start(None, Mode.SLEEP, while_claude=True)
+    inhibitor.fail = True
+    with pytest.raises(RuntimeError):
+        c.start(3600, Mode.SLEEP)
+    inhibitor.fail = False
+    claude.sessions = [session("a")]
+    c.tick()
+    assert inhibitor.held is not None
+    assert lid.engaged
+
+
 def test_a_failing_lid_change_is_not_retried_on_every_tick(claude_env):
     c, _, lid, clock, _, _ = claude_env
     c.ignore_lid = True

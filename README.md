@@ -78,7 +78,7 @@ Run `wakeful` (or start it from the application menu) and an icon appears in the
 - **Left-click** starts a block of the length you last used (an hour, the first time), or turns a running block off.
 - **Right-click** opens the menu: *Keep awake for* a preset or custom length, *Add time*, *Turn off*, the mode, and the options.
 
-The icon is a closed grey eye while sleep is allowed, an open orange eye while a block runs, and an open eye with rays when the screen is kept on too.
+The icon is a closed grey eye while sleep is allowed, an open orange eye while a block keeps the computer awake, and an open eye with rays when the screen is kept on too.
 
 From a terminal, or bound to a key under *System Settings → Keyboard → Shortcuts → Add New → Command or Script*:
 
@@ -129,7 +129,7 @@ While it is on, a laptop closed and put in a bag stays awake until the block end
 
 ## Claude Code
 
-*Keep awake for → While Claude is working* (or `wakeful start claude`) starts a block that lasts as long as any [Claude Code](https://claude.com/claude-code) session of yours on this computer is working. It ends once none has been working for a minute, so a pause between two turns does not end it. It is offered when `~/.claude` exists (or `$CLAUDE_CONFIG_DIR`, if that is set in the environment Wakeful itself was started in), and refused if no session is working when you start it. Like any block, it keeps the mode chosen in the menu, and the lid option applies to it.
+*Keep awake for → While Claude is working* (or `wakeful start claude`) starts a block that runs until you turn it off, and keeps the computer awake only while any [Claude Code](https://claude.com/claude-code) session of yours on this computer is working, and for a minute after the last one stops, so a pause between two turns does not count. The rest of the time it holds nothing: the computer dims, locks and sleeps on its usual timers, and the icon shows sleep as allowed. It does not matter whether Claude is working when you start it. It is offered when `~/.claude` exists (or `$CLAUDE_CONFIG_DIR`, if that is set in the environment Wakeful itself was started in). It keeps the mode chosen in the menu, and with the lid option on, closing the lid is ignored only while Claude is keeping the computer awake.
 
 A session counts as working while it is running a turn, including any subagents, and while a shell it started is still running after the turn has ended, even one that is only waiting. A session sitting at its prompt, or waiting for you to answer a question or approve a command, does not.
 
@@ -137,7 +137,7 @@ While any block runs, whatever its length, the menu has a *Claude is working (N)
 
 Wakeful finds out by reading the files Claude Code keeps for each running process in `~/.claude/sessions`, every five seconds while a block runs. A file left behind by a process that has gone, or whose process number has been reused, is ignored. These files are Claude Code's own and not a documented interface, so a future Claude Code release could change them, and Wakeful would stop seeing sessions until it catches up.
 
-A background shell that never ends, such as a forgotten `tail -f`, keeps the block going until it is stopped. The submenu shows which session has it.
+A background shell that never ends, such as a forgotten `tail -f`, keeps the computer awake until it is stopped. The submenu shows which session has it.
 
 ## Documentation
 

@@ -4,8 +4,9 @@ Qt-free. The tray and the D-Bus control interface call in; a periodic tick()
 reaps an expired block and keeps the inhibition's reason text current.
 
 While a block runs, tick() also reads which Claude Code sessions are working,
-so they can be shown. A block that lasts while Claude works ends once none has
-been working for CLAUDE_GRACE seconds.
+so they can be shown. A block that lasts while Claude works runs until it is
+turned off, but holds the inhibition (and the lid) only while a session is
+working and for CLAUDE_GRACE seconds after the last one was seen.
 """
 
 from __future__ import annotations
@@ -22,8 +23,8 @@ from .claude import ClaudeSession
 log = logging.getLogger(__name__)
 
 CLAUDE_GRACE = 60.0
-"""Seconds with no working session before a while-Claude block ends, so a
-pause between two turns does not end it."""
+"""Seconds a while-Claude block keeps holding after the last working session,
+so a pause between two turns does not let the computer sleep."""
 
 
 class Inhibitor(Protocol):
@@ -50,24 +51,29 @@ class ClaudeWatcher(Protocol):
 @dataclass(frozen=True)
 class Status:
     active: bool
+    """A block is running."""
     mode: Mode | None
     remaining: float | None
     """Seconds left; None when inactive or when the block has no end."""
     text: str
-    """'Keeping awake: 47 min left', 'Keeping awake while Claude is working', or
-    'Not keeping awake'."""
+    """'Keeping awake: 47 min left', 'Keeping awake while Claude is working',
+    'Sleep allowed until Claude is working', or 'Not keeping awake'."""
     lid_ignored: bool
     """The lid action is set to "Do nothing" right now."""
     ignore_lid: bool
-    """The option is on: the lid will be ignored whenever a block runs."""
+    """The option is on: the lid will be ignored whenever a block holds."""
     while_claude: bool = False
     """The block lasts while a Claude Code session is working."""
     claude: tuple[ClaudeSession, ...] = ()
     """The Claude Code sessions working while a block runs; empty otherwise."""
+    held: bool = False
+    """The inhibition is held: always during a timed block, and during a
+    while-Claude block only while Claude is working."""
 
 
 CLAUDE_NAMES_SHOWN = 3
 WHILE_CLAUDE_TEXT = "Keeping awake while Claude is working"
+CLAUDE_IDLE_TEXT = "Sleep allowed until Claude is working"
 
 
 def reason_text(remaining: float | None) -> str:
@@ -99,7 +105,7 @@ class Controller:
         self._ignore_lid = False
         self._lid_engaged = False
         self._claude: tuple[ClaudeSession, ...] = ()
-        self._claude_seen_at = 0.0
+        self._claude_seen_at: float | None = None
         self.on_changed: Callable[[Status], None] = lambda status: None
         self.on_ended: Callable[[Block, str], None] = lambda block, why: None
         """Called with the block and 'expired' or 'stopped'."""
@@ -111,15 +117,21 @@ class Controller:
         if block is None:
             return Status(False, None, None, "Not keeping awake", False, self._ignore_lid)
         remaining = block.remaining(self._now())
+        held = self._holding()
+        if not block.while_claude:
+            text = reason_text(remaining)
+        else:
+            text = WHILE_CLAUDE_TEXT if held else CLAUDE_IDLE_TEXT
         return Status(
             True,
             block.mode,
             remaining,
-            WHILE_CLAUDE_TEXT if block.while_claude else reason_text(remaining),
+            text,
             self._lid_engaged,
             self._ignore_lid,
             block.while_claude,
             self._claude,
+            held,
         )
 
     @property
@@ -142,20 +154,20 @@ class Controller:
 
     def start(self, duration: float | None, mode: Mode, while_claude: bool = False) -> None:
         """Start (or restart) a block. Raises if the inhibition cannot be taken,
-        or, for a block that lasts while Claude works, if no session is working.
+        or, for a block that lasts while Claude works, if Claude Code is missing.
 
         On failure a block that was already running carries on unchanged.
         """
+        if while_claude and not self.claude_available:
+            raise RuntimeError("Claude Code was not found")
         sessions = self._read_claude()
-        if while_claude:
-            if not self.claude_available:
-                raise RuntimeError("Claude Code was not found")
-            if not sessions:
-                raise RuntimeError("no Claude Code session is working")
         previous = self._session.block, self._claude, self._claude_seen_at
         self._session.start(duration, mode, self._now(), while_claude)
         self._claude = sessions
-        self._claude_seen_at = self._now()
+        if sessions:
+            self._claude_seen_at = self._now()
+        elif while_claude:
+            self._claude_seen_at = None
         try:
             self._apply()
         except Exception:
@@ -189,19 +201,15 @@ class Controller:
         self._end("stopped")
 
     def tick(self) -> None:
-        """Reap an ended block, or refresh the sessions and reason text of a running one."""
+        """Reap an expired block, or refresh the sessions and inhibition of a running one."""
         block = self._session.block
         if block is None:
             return
         now = self._now()
         self._claude = self._read_claude()
-        if block.while_claude:
-            if self._claude:
-                self._claude_seen_at = now
-            elif now - self._claude_seen_at >= CLAUDE_GRACE:
-                self._end("expired")
-                return
-        elif block.expired(now):
+        if self._claude:
+            self._claude_seen_at = now
+        if block.expired(now):
             self._end("expired")
             return
         # Retried on every tick: hold() also re-takes an inhibition that was
@@ -210,6 +218,7 @@ class Controller:
             self._apply()
         except Exception as e:
             log.warning("could not refresh the inhibition: %s", e)
+        self._sync_lid()
         self._changed()
 
     def shutdown(self) -> None:
@@ -221,14 +230,25 @@ class Controller:
 
     # -- internals ---------------------------------------------------------
 
+    def _holding(self) -> bool:
+        block = self._session.block
+        if block is None:
+            return False
+        if not block.while_claude or self._claude:
+            return True
+        seen = self._claude_seen_at
+        return seen is not None and self._now() - seen < CLAUDE_GRACE
+
     def _apply(self) -> None:
+        """Hold the inhibition the block asks for right now, or release it."""
         block = self._session.block
         assert block is not None
-        if block.while_claude:
-            reason = claude_reason_text(self._claude)
+        if not self._holding():
+            self._inhibitor.release()
+        elif block.while_claude:
+            self._inhibitor.hold(block.mode, claude_reason_text(self._claude))
         else:
-            reason = reason_text(block.remaining(self._now()))
-        self._inhibitor.hold(block.mode, reason)
+            self._inhibitor.hold(block.mode, reason_text(block.remaining(self._now())))
 
     def _read_claude(self) -> tuple[ClaudeSession, ...]:
         if self._claude_watcher is None:
@@ -251,7 +271,7 @@ class Controller:
     def _sync_lid(self) -> None:
         if self._lid is None:
             return
-        want = self._ignore_lid and self._session.active
+        want = self._ignore_lid and self._holding()
         if want == self._lid_engaged:
             return
         try:

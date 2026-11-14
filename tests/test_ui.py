@@ -46,15 +46,25 @@ def tray(tmp_path):
 
 def test_refused_while_claude_start_does_not_become_the_click_default(tray):
     t, controller, claude = tray
+    claude.installed = False
     t._start_while_claude()
     assert not controller.status().active
     assert not Settings().last_while_claude
     assert "Click to keep awake for 1 hour" in t.icon.toolTip()
 
-    claude.sessions = [ClaudeSession(1, "a", "busy", "/w")]
+    claude.installed = True
     t._start_while_claude()
     assert controller.status().while_claude
     assert Settings().last_while_claude
+
+
+def test_tooltip_says_sleep_is_allowed_while_claude_is_idle(tray):
+    t, controller, claude = tray
+    t._start_while_claude()
+    assert "sleep allowed until Claude is working" in t.icon.toolTip()
+    claude.sessions = [ClaudeSession(1, "a", "busy", "/w")]
+    controller.tick()
+    assert "Wakeful: while Claude is working" in t.icon.toolTip()
 
 
 def test_idle_tooltip_matches_what_a_click_starts(tray):

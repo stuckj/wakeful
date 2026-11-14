@@ -457,14 +457,19 @@ def test_while_claude_needs_the_config_directory(stub, app):
     assert "Claude Code was not found" in r.stderr
 
 
-def test_while_claude_is_refused_when_nothing_is_working(stub, app, claude_session):
+def test_while_claude_holds_only_once_a_session_is_working(stub, app, claude_session):
     _, write = claude_session
     write("idle")
     a = app("--no-tray")
     r = a.cli("start", "claude")
-    assert r.returncode == 1
-    assert "no Claude Code session is working" in r.stderr
+    assert r.returncode == 0, r.stderr
+    assert "Sleep allowed until Claude is working" in r.stdout
     assert stub.held() == []
+    write("busy")
+    wait_for(
+        lambda: reasons(stub) == ["Claude is working: fix the tests"],
+        what="the inhibition to be taken once the session works",
+    )
 
 
 def test_while_claude_follows_the_mode_and_lists_the_session(stub, app, claude_session):

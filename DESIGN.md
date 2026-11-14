@@ -111,10 +111,12 @@ monitor is connected" lid rule.
 
 ## Following Claude Code
 
-"While Claude is working" is a length of block, like "until turned off": the block has no end
-time and the controller reaps it once no session has been working for a grace period, instead of
-when a time passes. Everything else about it is an ordinary block (its mode, the lid option, the
-single inhibition), so Claude activity adds no second path to holding or releasing anything.
+"While Claude is working" is a length of block, like "until turned off": it has no end time and
+runs until the user turns it off. Unlike other blocks it does not hold all the time. The
+controller holds its inhibition, and engages the lid, only while a session is working and for a
+grace period after, and releases both in between, so the session's own idle timers decide when
+an idle computer sleeps. Its mode and the single inhibition are an ordinary block's, so Claude
+activity adds no second path to holding or releasing anything.
 
 While any block runs, the controller reads which sessions are working on each tick so the tray
 and `Status` can show them. With no block it reads nothing.

@@ -30,6 +30,7 @@ def status_dict(status: Status) -> dict[str, Any]:
         "lid_ignored": status.lid_ignored,
         "ignore_lid": status.ignore_lid,
         "while_claude": status.while_claude,
+        "held": status.held,
         "claude_sessions": [
             {"name": s.name, "status": s.status, "cwd": s.cwd, "pid": s.pid} for s in status.claude
         ],

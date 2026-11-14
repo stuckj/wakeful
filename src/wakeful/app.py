@@ -94,11 +94,13 @@ def run_command(args: argparse.Namespace) -> int:
     sessions = status.get("claude_sessions", [])
     if status["active"]:
         mode = Mode(status["mode"])
-        if status.get("while_claude"):
-            how_long = "while Claude is working"
-        else:
+        if not status.get("while_claude"):
             how_long = describe_remaining(status["remaining"])
-        print(f"Keeping awake ({mode.label.lower()}): {how_long}")
+            print(f"Keeping awake ({mode.label.lower()}): {how_long}")
+        elif status.get("held"):
+            print(f"Keeping awake ({mode.label.lower()}) while Claude is working.")
+        else:
+            print(f"Sleep allowed until Claude is working ({mode.label.lower()}).")
         if status["lid_ignored"]:
             print("Closing the lid will not sleep.")
     else:

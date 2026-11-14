@@ -200,14 +200,19 @@ class Tray(QObject):
                 click = f"Click to keep awake for {describe_duration(self._settings.last_duration)}"
             self.icon.setToolTip(f"Wakeful: sleep allowed\n{click}")
             return
-        self.icon.setIcon(
-            self._icon_active_screen if status.mode is Mode.SCREEN else self._icon_active
-        )
+        if not status.held:
+            self.icon.setIcon(self._icon_idle)
+        elif status.mode is Mode.SCREEN:
+            self.icon.setIcon(self._icon_active_screen)
+        else:
+            self.icon.setIcon(self._icon_active)
         assert status.mode is not None
-        if status.while_claude:
+        if not status.while_claude:
+            how_long = describe_remaining(status.remaining)
+        elif status.held:
             how_long = "while Claude is working"
         else:
-            how_long = describe_remaining(status.remaining)
+            how_long = "sleep allowed until Claude is working"
         lines = [f"Wakeful: {how_long}", status.mode.label]
         if status.lid_ignored:
             lines.append("Closing the lid will not sleep")
@@ -326,8 +331,9 @@ class Tray(QObject):
 
     def _ended(self, block: Block, why: str) -> None:
         if why == "expired" and self._settings.notify:
-            if block.while_claude:
-                text = "Claude has finished. The computer can sleep again."
-            else:
-                text = "Time is up. The computer can sleep again."
-            self.icon.showMessage("Wakeful", text, self._icon_idle, 10000)
+            self.icon.showMessage(
+                "Wakeful",
+                "Time is up. The computer can sleep again.",
+                self._icon_idle,
+                10000,
+            )

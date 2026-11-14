@@ -87,11 +87,13 @@ restores them. A value changed in System Settings during the block is left as
 it is.
 .SH CLAUDE CODE
 A block started with \fBWhile Claude is working\fR (or \fBwakeful start
-claude\fR) lasts while any Claude Code session of the same user on this
-computer is running a turn or still has a shell running, and ends once none has
-been for a minute. Sessions at their prompt, or waiting for an answer, do not
-count. It is refused if no session is working when it starts, and is offered
-only when the Claude Code configuration directory exists.
+claude\fR) runs until it is turned off, but keeps the computer awake only while
+any Claude Code session of the same user on this computer is running a turn or
+still has a shell running, and for a minute after the last one stops. The rest
+of the time it holds nothing and the computer sleeps on its usual timers; the
+lid option, too, applies only while it is keeping the computer awake. Sessions
+at their prompt, or waiting for an answer, do not count. It is offered only
+when the Claude Code configuration directory exists.
 .PP
 While any block runs, the working sessions are listed in the tray menu and by
 \fBwakeful status\fR. They are read from the files Claude Code keeps in

@@ -105,7 +105,7 @@ class Controller:
         self._ignore_lid = False
         self._lid_engaged = False
         self._agents_enabled = False
-        self._watched: set[str] = set()
+        self._watched = set(self._watchers)
         self._sessions: tuple[AgentSession, ...] = ()
         self._seen_at: float | None = None
         self._held = False

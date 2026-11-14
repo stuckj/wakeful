@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from wakeful.opencode import REQUERY_AFTER, OpencodeWatcher
+from wakeful.opencode import REQUERY_AFTER, SILENT_FOR, OpencodeWatcher
 
 BOOT = 1_799_990_000
 NOW = 1_800_000_000.0
@@ -29,6 +29,7 @@ def v1_db(home, steps):
         "time_updated INT, data TEXT)"
     )
     conn.execute("CREATE TABLE credential (id TEXT, secret TEXT)")
+    conn.execute("CREATE TABLE part (id TEXT, session_id TEXT, time_updated INT)")
     conn.execute("INSERT INTO session VALUES ('s1', 'fix the tests', '/work/app')")
     for i, step in enumerate(steps):
         add_step(conn, f"m{i}", *step)
@@ -94,6 +95,28 @@ def test_an_upgraded_binary_still_counts(watcher):
 def test_a_step_left_by_a_crash_before_this_process_started_is_ignored(watcher):
     w = watcher([("assistant", False, 3600)], started_ago=60)
     assert w.working() == ()
+
+
+def test_a_step_left_by_a_crash_while_an_older_opencode_runs_there_expires(watcher):
+    w = watcher([("assistant", False, SILENT_FOR + 60)], started_ago=SILENT_FOR + 3600)
+    assert w.working() == ()
+
+
+def test_a_long_step_counts_while_its_session_is_being_written(tmp_path, watcher):
+    w = watcher([("assistant", False, SILENT_FOR + 60)], started_ago=SILENT_FOR + 3600)
+    conn = sqlite3.connect(tmp_path / "data" / "opencode.db")
+    conn.execute("INSERT INTO part VALUES ('p1', 's1', ?)", (int((NOW - 30) * 1000),))
+    conn.commit()
+    conn.close()
+    assert len(w.working()) == 1
+
+
+def test_opencode_in_a_parent_directory_does_not_count(watcher):
+    assert watcher([("assistant", False, 5)], cwd="/work").working() == ()
+
+
+def test_opencode_in_a_subdirectory_counts(watcher):
+    assert len(watcher([("assistant", False, 5)], cwd="/work/app/src").working()) == 1
 
 
 def test_the_database_is_not_opened_while_opencode_is_not_running(tmp_path):

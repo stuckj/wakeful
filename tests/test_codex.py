@@ -85,8 +85,43 @@ def test_the_last_turn_event_is_found_behind_large_output(tmp_path):
 def test_last_turn_event_ignores_lines_that_only_mention_one(tmp_path):
     path = tmp_path / "r.jsonl"
     lines = [event("task_started"), {"type": "response_item", "payload": {"text": "task_complete"}}]
-    path.write_text("".join(json.dumps(line) + "\n" for line in lines) + '{"half')
-    assert last_turn_event(path) == "task_started"
+    complete = "".join(json.dumps(line) + "\n" for line in lines)
+    path.write_text(complete + '{"half')
+    assert last_turn_event(path) == ("task_started", len(complete))
+
+
+def append(w, text):
+    [rollout] = (w.home / "sessions").glob("*/*/*/*.jsonl")
+    with rollout.open("a") as f:
+        f.write(text)
+
+
+def test_a_long_turn_stays_working_however_much_it_writes(tmp_path):
+    w = home_with(tmp_path, ["task_started"])
+    assert len(w.working()) == 1
+    big = json.dumps({"type": "response_item", "payload": {"text": "x" * 100_000}}) + "\n"
+    append(w, big * 50)  # 5 MB written by the one turn
+    assert len(w.working()) == 1
+    append(w, json.dumps(event("task_complete")) + "\n")
+    assert w.working() == ()
+
+
+def test_a_turn_event_caught_half_written_is_read_once_complete(tmp_path):
+    w = home_with(tmp_path, ["task_started", "task_complete"])
+    assert w.working() == ()
+    line = json.dumps(event("task_started")) + "\n"
+    append(w, line[:20])
+    assert w.working() == ()
+    append(w, line[20:])
+    assert len(w.working()) == 1
+
+
+def test_a_symlinked_home_is_matched_by_file_identity(tmp_path):
+    w = home_with(tmp_path, ["task_started"], device="00:3b")
+    link = tmp_path / "linked-codex"
+    link.symlink_to(w.home)
+    w.home = link
+    assert len(w.working()) == 1
 
 
 def test_flock_holders_skips_waiters_and_other_kinds():

@@ -29,8 +29,6 @@ from .agents import AgentSession
 STARTED = {"task_started", "turn_started"}
 ENDED = {"task_complete", "turn_complete", "turn_aborted"}
 TAIL_CHUNK = 64 * 1024
-TAIL_MAX = 4 * 1024 * 1024
-"""Read at most this much from the end of a rollout looking for a turn event."""
 
 
 def codex_home() -> Path:
@@ -56,37 +54,47 @@ def flock_holders(text: str) -> dict[int, list[tuple[int, int, int]]]:
     return holders
 
 
-def has_open(proc: Path, pid: int, path: Path) -> bool:
-    """pid has path open, by its /proc fd links."""
-    target = str(path)
+def has_open(proc: Path, pid: int, st: os.stat_result) -> bool:
+    """pid has the file st describes open, by the identity of its /proc fds."""
     try:
         for fd in (proc / str(pid) / "fd").iterdir():
             try:
-                if os.readlink(fd) == target:
-                    return True
+                target = fd.stat()
             except OSError:
                 continue
+            if (target.st_dev, target.st_ino) == (st.st_dev, st.st_ino):
+                return True
     except OSError:
         return False
     return False
 
 
-def last_turn_event(path: Path) -> str | None:
-    """The type of the last turn start or end event in a rollout, read from its end."""
+def last_turn_event(path: Path, start: int = 0) -> tuple[str | None, int]:
+    """The last turn start or end event among the complete lines from byte start on,
+    read from the end, and the offset where those complete lines end."""
     with path.open("rb") as f:
-        end = f.seek(0, os.SEEK_END)
-        pos, carry = end, b""
-        while pos > 0 and end - pos < TAIL_MAX:
-            step = min(TAIL_CHUNK, pos)
+        pos = f.seek(0, os.SEEK_END)
+        carry, complete = b"", None
+        while pos > start:
+            step = min(TAIL_CHUNK, pos - start)
             pos -= step
             f.seek(pos)
-            lines = (f.read(step) + carry).split(b"\n")
-            carry = lines.pop(0) if pos > 0 else b""
+            chunk = f.read(step) + carry
+            if complete is None:
+                # A line still being written is left for the next read.
+                newline = chunk.rfind(b"\n")
+                if newline < 0:
+                    carry = chunk
+                    continue
+                complete = pos + newline + 1
+                chunk = chunk[: newline + 1]
+            lines = chunk.split(b"\n")
+            carry = lines.pop(0) if pos > start else b""
             for line in reversed(lines):
                 found = _turn_event(line)
                 if found:
-                    return found
-        return None
+                    return found, complete
+        return None, start if complete is None else complete
 
 
 def _mtime(path: Path) -> int:
@@ -121,6 +129,8 @@ class CodexWatcher:
         self._cwds: dict[Path, str] = {}
         self._confirmed: set[tuple[int, int]] = set()
         """(inode, pid) pairs already seen holding a lock file open."""
+        self._scans: dict[Path, tuple[int, int, str | None]] = {}
+        """Per rollout: its inode, how far it has been read, and the last turn event."""
 
     def available(self) -> bool:
         return any((self.home / n).exists() for n in ("sessions", "config.toml", "auth.json"))
@@ -149,7 +159,7 @@ class CodexWatcher:
             if rollout is None:
                 continue
             try:
-                if last_turn_event(rollout) not in STARTED:
+                if self._turn(rollout) not in STARTED:
                     continue
             except OSError:
                 continue
@@ -157,6 +167,18 @@ class CodexWatcher:
             name = Path(cwd).name if cwd else lock.stem[:8]
             found.append(AgentSession(self.label, pid, name, "working", cwd))
         return tuple(found)
+
+    def _turn(self, rollout: Path) -> str | None:
+        """The last turn event in rollout, reading only what was appended since last time."""
+        st = rollout.stat()
+        scanned = self._scans.get(rollout)
+        if scanned is not None and scanned[0] == st.st_ino and st.st_size >= scanned[1]:
+            event, end = last_turn_event(rollout, scanned[1])
+            event = event or scanned[2]
+        else:
+            event, end = last_turn_event(rollout)
+        self._scans[rollout] = (st.st_ino, end, event)
+        return event
 
     def _holder(self, lock: Path, st: os.stat_result, entries: list) -> int | None:
         """The pid holding lock, or None. /proc/locks names the filesystem's device,
@@ -166,7 +188,7 @@ class CodexWatcher:
             if (major, minor) == (os.major(st.st_dev), os.minor(st.st_dev)):
                 return pid
         for _major, _minor, pid in entries:
-            if (st.st_ino, pid) in self._confirmed or has_open(self._proc, pid, lock):
+            if (st.st_ino, pid) in self._confirmed or has_open(self._proc, pid, st):
                 self._confirmed.add((st.st_ino, pid))
                 return pid
         return None

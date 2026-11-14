@@ -265,7 +265,7 @@ def agents_env(env):
     claude, codex = FakeAgent(), FakeAgent("codex", "Codex")
     c = Controller(inhibitor, lid, now=clock, agents=[claude, codex])
     c.on_ended = lambda block, why: ended.append((block, why))
-    c.set_watched("claude", True)
+    c.set_watched("codex", False)
     return c, inhibitor, lid, clock, claude, codex, ended
 
 

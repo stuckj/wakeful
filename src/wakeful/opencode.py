@@ -12,10 +12,12 @@ is a documented interface:
 
 The database records no process, and a crash leaves an unfinished step behind
 for good. So a step counts only while an opencode process runs in its session's
-directory and was started before the step: one left by an earlier process is
-older than every process running now. Nothing is read while no opencode process
-runs. The database is opened read-only, and only the session and message tables
-are read; the same file holds credentials.
+directory (or below it) and was started before the step: one left by an earlier
+process is older than every process running now. A 1.x step whose session has
+written nothing for SILENT_FOR is also taken to be left behind, which covers a
+process killed while an older one runs in the same directory. Nothing is read
+while no opencode process runs. The database is opened read-only, and only the
+session, message and part tables are read; the same file holds credentials.
 """
 
 from __future__ import annotations
@@ -35,8 +37,15 @@ CLOCK_SLACK = 2.0
 """Seconds of disagreement allowed between a process's start time, derived from
 the boot time, and the wall-clock times opencode records."""
 
+SILENT_FOR = 2 * 3600
+"""Seconds without any write to a 1.x session after which its unfinished step is
+taken to be left by a killed process. A single tool running silently for longer
+stops counting."""
+
 WORKING_V1 = """
-    SELECT s.id, s.title, s.directory, max(m.time_created)
+    SELECT s.id, s.title, s.directory, max(m.time_created),
+           max(max(m.time_updated),
+               coalesce((SELECT max(p.time_updated) FROM part p WHERE p.session_id = s.id), 0))
     FROM message m JOIN session s ON s.id = m.session_id
     WHERE m.time_created >= ?
       AND json_extract(m.data, '$.role') = 'assistant'
@@ -44,7 +53,7 @@ WORKING_V1 = """
     GROUP BY s.id
 """
 WORKING_V2 = """
-    SELECT id, title, directory, time_busy FROM session_v2
+    SELECT id, title, directory, time_busy, time_busy FROM session_v2
     WHERE time_busy IS NOT NULL AND (time_idle IS NULL OR time_idle < time_busy)
 """
 
@@ -103,8 +112,9 @@ def _stamp(path: Path) -> tuple[int, int] | None:
 
 
 def _within(directory: str, cwd: str) -> bool:
+    """cwd is the session's directory or below it; never a parent, such as ~ or /."""
     a, b = directory.rstrip("/"), cwd.rstrip("/")
-    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+    return bool(a) and (a == b or b.startswith(a + "/"))
 
 
 def _seconds(t: float) -> float:
@@ -127,7 +137,7 @@ class OpencodeWatcher:
         self._now = now
         self._key: tuple = ()
         self._queried_at = float("-inf")
-        self._busy: list[tuple[str, str, str, float]] = []
+        self._busy: list[tuple[str, str, str, float, float | None]] = []
 
     def available(self) -> bool:
         return (self.home / "opencode.db").is_file()
@@ -145,7 +155,9 @@ class OpencodeWatcher:
             self._busy = self._busy_sessions(since)
             self._key, self._queried_at = key, self._now()
         found = []
-        for _id, title, directory, step in self._busy:
+        for _id, title, directory, step, last_write in self._busy:
+            if last_write is not None and self._now() - last_write >= SILENT_FOR:
+                continue
             owner = next(
                 (p for p in procs if _within(directory, p.cwd) and p.started - CLOCK_SLACK <= step),
                 None,
@@ -155,22 +167,24 @@ class OpencodeWatcher:
                 found.append(AgentSession(self.label, owner.pid, name, "working", directory))
         return tuple(found)
 
-    def _busy_sessions(self, since: float) -> list[tuple[str, str, str, float]]:
-        """Sessions with a step begun since `since`, and when that step began."""
+    def _busy_sessions(self, since: float) -> list[tuple[str, str, str, float, float | None]]:
+        """Sessions with a step begun since `since`: when that step began, and,
+        for 1.x, when the session was last written."""
         db = self.home / "opencode.db"
         if not db.is_file():
             return []
         conn = sqlite3.connect(f"{db.absolute().as_uri()}?mode=ro", uri=True, timeout=0.5)
         try:
             tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
-            if "session_v2" in tables:
+            v2 = "session_v2" in tables
+            if v2:
                 rows = list(conn.execute(WORKING_V2))
             else:
                 rows = list(conn.execute(WORKING_V1, (int(since * 1000),)))
         finally:
             conn.close()
         return [
-            (str(a), str(b or ""), str(c or ""), _seconds(t))
-            for a, b, c, t in rows
+            (str(a), str(b or ""), str(c or ""), _seconds(t), None if v2 else _seconds(w or 0))
+            for a, b, c, t, w in rows
             if t is not None and _seconds(t) >= since
         ]

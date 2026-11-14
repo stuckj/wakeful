@@ -236,6 +236,14 @@ def test_another_opencode_outside_the_directory_still_does_not_count(tmp_path):
     assert OpencodeWatcher(home, proc, now=Clock()).working() == ()
 
 
+def test_an_unreadable_database_does_not_hide_the_others(tmp_path):
+    home = tmp_path / "data"
+    v1_db(home, [("assistant", False, 5)])
+    (home / "opencode-broken.db").write_bytes(b"not a database" * 100)
+    w = OpencodeWatcher(home, fake_proc(tmp_path), now=Clock())
+    assert [s.name for s in w.working()] == ["fix the tests"]
+
+
 def test_a_channel_database_is_read(tmp_path):
     home = tmp_path / "data"
     home.mkdir()

@@ -296,8 +296,10 @@ class Tray(QObject):
             return
         step = self._next_click()
         if step == "off":
-            self._controller.stop()
+            # Agentic checks first: stopping the timer first would hold for
+            # working agents only to release again.
             self._guard(lambda: self._controller.set_agents_enabled(False))
+            self._controller.stop()
         elif step == "agents":
             self._guard(lambda: self._controller.set_agents_enabled(True))
         else:

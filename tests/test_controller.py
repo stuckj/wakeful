@@ -148,6 +148,7 @@ def test_start_failure_leaves_nothing_running(env):
         c.start(60, Mode.SLEEP)
     assert not c.status().active
     assert not lid.engaged
+    assert inhibitor.calls == [("release",)]
 
 
 def test_failed_restart_keeps_the_running_block_and_lid(env):
@@ -359,6 +360,22 @@ def test_watcher_error_counts_as_nothing_working(claude_env):
     clock.t += CLAUDE_GRACE
     c.tick()
     assert ended
+
+
+def test_failed_start_keeps_the_grace_of_the_running_while_claude_block(claude_env):
+    c, inhibitor, _, clock, claude, ended = claude_env
+    claude.sessions = [session("a")]
+    c.start(None, Mode.SLEEP, while_claude=True)
+    claude.sessions = []
+    clock.t += CLAUDE_GRACE - 10
+    c.tick()
+    inhibitor.fail = True
+    with pytest.raises(RuntimeError):
+        c.start(3600, Mode.SLEEP)
+    inhibitor.fail = False
+    clock.t += 10
+    c.tick()
+    assert ended and ended[0][0].while_claude
 
 
 def test_failed_while_claude_start_keeps_the_running_block(claude_env):

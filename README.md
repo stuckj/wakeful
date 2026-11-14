@@ -129,7 +129,7 @@ While it is on, a laptop closed and put in a bag stays awake until the block end
 
 ## Claude Code
 
-*Keep awake for → While Claude is working* (or `wakeful start claude`) starts a block that lasts as long as any [Claude Code](https://claude.com/claude-code) session of yours on this computer is working. It ends once none has been working for a minute, so a pause between two turns does not end it. It is offered when `~/.claude` (or `$CLAUDE_CONFIG_DIR`) exists, and refused if no session is working when you start it. Like any block, it keeps the mode chosen in the menu, and the lid option applies to it.
+*Keep awake for → While Claude is working* (or `wakeful start claude`) starts a block that lasts as long as any [Claude Code](https://claude.com/claude-code) session of yours on this computer is working. It ends once none has been working for a minute, so a pause between two turns does not end it. It is offered when `~/.claude` exists (or `$CLAUDE_CONFIG_DIR`, if that is set in the environment Wakeful itself was started in), and refused if no session is working when you start it. Like any block, it keeps the mode chosen in the menu, and the lid option applies to it.
 
 A session counts as working while it is running a turn, including any subagents, and while a shell it started is still running after the turn has ended, even one that is only waiting. A session sitting at its prompt, or waiting for you to answer a question or approve a command, does not.
 

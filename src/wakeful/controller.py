@@ -152,15 +152,15 @@ class Controller:
                 raise RuntimeError("Claude Code was not found")
             if not sessions:
                 raise RuntimeError("no Claude Code session is working")
-        previous, previous_claude = self._session.block, self._claude
+        previous = self._session.block, self._claude, self._claude_seen_at
         self._session.start(duration, mode, self._now(), while_claude)
         self._claude = sessions
         self._claude_seen_at = self._now()
         try:
             self._apply()
         except Exception:
-            self._session.block, self._claude = previous, previous_claude
-            if previous is None:
+            self._session.block, self._claude, self._claude_seen_at = previous
+            if self._session.block is None:
                 self._inhibitor.release()
             self._sync_lid()
             self._changed()

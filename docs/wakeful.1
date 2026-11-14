@@ -56,8 +56,8 @@ Add time to the running block.
 End the running block.
 .TP
 .B status
-Print what is being kept awake and for how long, and which Claude Code
-sessions are working.
+Print what is being kept awake and for how long, and, while a block runs, which
+Claude Code sessions are working.
 .PP
 \fIDURATION\fR is minutes as a bare number (\fB90\fR), or hours, minutes and
 seconds such as \fB1h30m\fR, \fB45m\fR or \fB20s\fR. \fBforever\fR means no end.
@@ -96,7 +96,9 @@ only when the Claude Code configuration directory exists.
 While any block runs, the working sessions are listed in the tray menu and by
 \fBwakeful status\fR. They are read from the files Claude Code keeps in
 \fI$CLAUDE_CONFIG_DIR/sessions\fR (default \fI~/.claude/sessions\fR), every
-five seconds; a file whose process has gone is ignored.
+five seconds; a file whose process has gone is ignored. \fBCLAUDE_CONFIG_DIR\fR
+is taken from the environment of the running tray, not of the shell that runs
+\fBwakeful start\fR.
 .SH FILES
 .TP
 .I ~/.config/wakeful/wakeful.conf

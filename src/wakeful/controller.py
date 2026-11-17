@@ -5,7 +5,7 @@ reaps an expired block and keeps the inhibition's reason text current.
 
 Two things can keep the computer awake, independently: the timed block the user
 started, and, with agentic checks on, any watched coding agent that is working
-(and for AGENT_GRACE seconds after the last one was seen). One inhibition serves
+(and for a grace period, AGENT_GRACE by default, after the last one was seen). One inhibition serves
 both, in the block's mode while there is a block and in the chosen mode
 otherwise. The lid follows the inhibition. Agentic checks stay on while nothing
 is working; they then hold nothing and the session's own idle timers apply.
@@ -20,13 +20,13 @@ from typing import Protocol
 
 from . import clock
 from .agents import AgentSession, AgentWatcher
-from .block import Block, Mode, Session, describe_remaining
+from .block import MAX_DURATION, Block, Mode, Session, describe_remaining
 
 log = logging.getLogger(__name__)
 
 AGENT_GRACE = 60.0
-"""Seconds agentic checks keep holding after the last working session, so a
-pause between two turns does not let the computer sleep."""
+"""Seconds agentic checks keep holding after the last working session, by
+default, so a pause between two turns does not let the computer sleep."""
 
 
 class Inhibitor(Protocol):
@@ -70,6 +70,8 @@ class Status:
     """Agentic checks are on and at least one ticked agent is installed."""
     sessions: tuple[AgentSession, ...] = ()
     """Working sessions of the ticked agents, read while a block runs or while watching."""
+    grace: float = AGENT_GRACE
+    """Seconds agentic checks keep holding after the last working session."""
 
 
 NAMES_SHOWN = 3
@@ -108,6 +110,7 @@ class Controller:
         self._watched = set(self._watchers)
         self._sessions: tuple[AgentSession, ...] = ()
         self._seen_at: float | None = None
+        self._grace = AGENT_GRACE
         self._held = False
         """Whether the last successful _apply() left the inhibition held."""
         self._failing: set[str] = set()
@@ -141,6 +144,7 @@ class Controller:
             watched=tuple(k for k in self._watchers if k in self._watched),
             watching=self._watching(),
             sessions=self._sessions,
+            grace=self._grace,
         )
 
     def agents(self) -> list[tuple[str, str, bool]]:
@@ -208,6 +212,13 @@ class Controller:
         self._agents_enabled = value
         self._refresh()
 
+    def set_grace(self, seconds: float) -> None:
+        """How long agentic checks keep holding after the last working session."""
+        if not 0 <= seconds <= MAX_DURATION:
+            raise ValueError("the grace period must be between 0 and 2**31-1 seconds")
+        self._grace = float(seconds)
+        self._refresh()
+
     def set_watched(self, key: str, value: bool) -> None:
         if key not in self._watchers:
             raise ValueError(f"unknown agent {key!r}; known: {', '.join(self._watchers)}")
@@ -246,7 +257,7 @@ class Controller:
             return False
         if self._sessions:
             return True
-        return self._seen_at is not None and self._now() - self._seen_at < AGENT_GRACE
+        return self._seen_at is not None and self._now() - self._seen_at < self._grace
 
     def _poll(self) -> None:
         """Read the working sessions of the ticked agents, when anything needs them."""

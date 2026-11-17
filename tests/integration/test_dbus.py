@@ -540,3 +540,11 @@ def test_tray_restores_agentic_checks_from_its_settings(stub, app, env, claude_s
     a = app()
     wait_for(lambda: stub.held(), what="the tray to hold for the working session")
     assert "Claude Code: fix the tests (working)" in a.cli("status").stdout
+
+
+def test_agents_grace_is_set_and_shown(stub, app):
+    a = app("--no-tray")
+    r = a.cli("agents", "grace", "2m")
+    assert r.returncode == 0, r.stderr
+    assert "then 2 minutes" in r.stdout
+    assert "then no extra time" in a.cli("agents", "grace", "0").stdout

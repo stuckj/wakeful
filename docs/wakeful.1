@@ -14,7 +14,8 @@ wakeful \- keep a Plasma session awake for a time or while coding agents work
 .B wakeful stop
 .br
 .B wakeful agents
-[\fBon\fR|\fBoff\fR | \fIAGENT\fR \fBon\fR|\fBoff\fR]
+[\fBon\fR|\fBoff\fR | \fIAGENT\fR \fBon\fR|\fBoff\fR |
+\fBgrace\fR \fIDURATION\fR]
 .br
 .B wakeful status
 .SH DESCRIPTION
@@ -73,6 +74,10 @@ Turn the agentic checks on or off. Which agents are ticked is kept.
 \fBagents\fR \fIAGENT\fR \fBon\fR|\fBoff\fR
 Tick or untick one agent: \fBclaude\fR, \fBcodex\fR or \fBopencode\fR.
 .TP
+\fBagents grace\fR \fIDURATION\fR
+How long to keep awake after the last working agent stops; \fB0\fR for no
+extra time. The default is a minute.
+.TP
 .BR status ", " agents
 Print what is being kept awake and why, and which agent sessions are working.
 .PP
@@ -94,7 +99,9 @@ The agentic checks are below the timer choices in the tray's \fBKeep awake
 for\fR menu: \fBAgentic checks enabled\fR, and a checkmark for each of Claude
 Code, Codex and opencode. While they are on, the computer is kept awake while
 any ticked agent of the same user on this computer is running a turn, and for a
-minute after the last one stops; the rest of the time they hold nothing and the
+grace period after the last one stops (a minute unless changed in \fBKeep awake
+after agents stop\fR or with \fBagents grace\fR); the rest of the time they hold
+nothing and the
 computer sleeps on its usual timers. They are never turned off for you, and
 they are remembered across restarts. An agent sitting at its prompt does not
 count. The working sessions are listed in the tray menu and by

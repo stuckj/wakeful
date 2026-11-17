@@ -33,6 +33,7 @@ def status_dict(status: Status) -> dict[str, Any]:
         "agents_enabled": status.agents_enabled,
         "watched": list(status.watched),
         "watching": status.watching,
+        "grace": round(status.grace),
         "sessions": [
             {"agent": s.agent, "name": s.name, "doing": s.doing, "cwd": s.cwd, "pid": s.pid}
             for s in status.sessions
@@ -82,6 +83,11 @@ class ControlAdaptor(QDBusAbstractAdaptor):
     def SetAgentWatched(self, agent: str, value: bool) -> str:
         """Tick or untick one agent, e.g. 'claude'."""
         return self._answer(lambda: self._controller.set_watched(agent, value))
+
+    @pyqtSlot(int, result=str)
+    def SetAgentGrace(self, seconds: int) -> str:
+        """How long agentic checks keep holding after agents stop working."""
+        return self._answer(lambda: self._controller.set_grace(seconds))
 
     @pyqtSlot(result=str)
     def Stop(self) -> str:

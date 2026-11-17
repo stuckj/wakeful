@@ -4,6 +4,7 @@ from wakeful.block import (
     Mode,
     Session,
     describe_duration,
+    describe_grace,
     describe_remaining,
     parse_duration,
 )
@@ -162,3 +163,11 @@ def test_parse_duration(text, seconds):
 def test_parse_duration_rejects(text):
     with pytest.raises(ValueError):
         parse_duration(text)
+
+
+def test_describe_grace():
+    assert describe_grace(0) == "no extra time"
+    assert describe_grace(30) == "30 seconds"
+    assert describe_grace(90) == "90 seconds"
+    assert describe_grace(60) == "1 minute"
+    assert describe_grace(300) == "5 minutes"

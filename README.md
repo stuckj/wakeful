@@ -96,6 +96,7 @@ wakeful extend 30m
 wakeful stop                # stop the timer; agentic checks carry on
 wakeful agents on           # agentic checks on (off to turn them off)
 wakeful agents codex off    # untick one agent: claude, codex or opencode
+wakeful agents grace 5m     # keep awake 5 minutes after agents stop (0 for none)
 wakeful status
 ```
 
@@ -138,7 +139,7 @@ While it is on, a laptop closed and put in a bag stays awake for as long as the 
 
 Below the timer choices in *Keep awake for* are the agentic checks: *Agentic checks enabled*, and a checkmark for each agent Wakeful knows — [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex) and [opencode](https://opencode.ai). An agent that is not installed is shown greyed out, and the agents are greyed out while *Agentic checks enabled* is off; turning it off keeps which ones are ticked.
 
-While agentic checks are on, Wakeful keeps the computer awake while any ticked agent of yours on this computer is working, and for a minute after the last one stops, so a pause between two turns does not count. The rest of the time they hold nothing: the computer dims, locks and sleeps on its usual timers, and the icon is the half-lidded eye. They are never turned off for you — not when the computer sleeps, not when a timer ends — and they are remembered when Wakeful restarts. A timer can run at the same time; the computer is kept awake while either wants it. Both use the mode chosen in the menu (a timer started with `wakeful start` uses `--screen` instead), and with the lid option on, closing the lid is ignored only while something is keeping the computer awake.
+While agentic checks are on, Wakeful keeps the computer awake while any ticked agent of yours on this computer is working, and for a grace period after the last one stops (a minute unless you choose otherwise under *Keep awake after agents stop*, or with `wakeful agents grace`), so a pause between two turns does not count. The rest of the time they hold nothing: the computer dims, locks and sleeps on its usual timers, and the icon is the half-lidded eye. They are never turned off for you — not when the computer sleeps, not when a timer ends — and they are remembered when Wakeful restarts. A timer can run at the same time; the computer is kept awake while either wants it. Both use the mode chosen in the menu (a timer started with `wakeful start` uses `--screen` instead), and with the lid option on, closing the lid is ignored only while something is keeping the computer awake.
 
 An agent counts as working while it is running a turn: thinking, running a tool or shell, or running a sub-agent. A session sitting at its prompt does not.
 

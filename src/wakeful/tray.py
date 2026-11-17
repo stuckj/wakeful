@@ -19,13 +19,21 @@ from PyQt6.QtWidgets import QInputDialog, QMenu, QSystemTrayIcon
 
 from . import autostart
 from .agents import AgentSession
-from .block import Block, Mode, describe_duration, describe_remaining, parse_duration
-from .controller import Controller, Status
+from .block import (
+    Block,
+    Mode,
+    describe_duration,
+    describe_grace,
+    describe_remaining,
+    parse_duration,
+)
+from .controller import AGENT_GRACE, Controller, Status
 
 log = logging.getLogger(__name__)
 
 ICONS = Path(__file__).parent / "icons"
 PRESETS: tuple[float, ...] = (30 * 60, 60 * 60, 2 * 3600, 4 * 3600)
+GRACE_PRESETS: tuple[float, ...] = (0, 60, 2 * 60, 5 * 60, 15 * 60)
 EXTENSIONS: tuple[float, ...] = (15 * 60, 30 * 60, 60 * 60)
 DEFAULT_DURATION = 60 * 60
 
@@ -90,6 +98,19 @@ class Settings:
         self._s.setValue(f"watch_{agent}", value)
 
     @property
+    def agent_grace(self) -> float:
+        """Seconds to keep awake after agents stop working."""
+        try:
+            seconds = float(self._s.value("agent_grace", AGENT_GRACE))
+        except (TypeError, ValueError):
+            return AGENT_GRACE
+        return seconds if seconds >= 0 else AGENT_GRACE
+
+    @agent_grace.setter
+    def agent_grace(self, seconds: float) -> None:
+        self._s.setValue("agent_grace", int(seconds))
+
+    @property
     def notify(self) -> bool:
         return self._bool("notify", True)
 
@@ -111,6 +132,7 @@ class Tray(QObject):
         controller.set_mode(settings.mode)
         for key, _label, _installed in controller.agents():
             controller.set_watched(key, settings.watched(key))
+        controller.set_grace(settings.agent_grace)
         controller.set_agents_enabled(settings.agents_enabled)
 
         self.icon = QSystemTrayIcon(self._icon_idle)
@@ -155,6 +177,19 @@ class Tray(QObject):
             action.setCheckable(True)
             action.toggled.connect(lambda value, k=key: self._set_watched(k, value))
             self._agent_actions[key] = action
+        self._grace_menu = self._start_menu.addMenu("Keep awake after agents stop")
+        self._grace_group = QActionGroup(self)
+        self._grace_actions: dict[float, QAction] = {}
+        for seconds in GRACE_PRESETS:
+            action = self._grace_menu.addAction(describe_grace(seconds).capitalize())
+            action.setCheckable(True)
+            action.setActionGroup(self._grace_group)
+            action.triggered.connect(lambda _=False, s=seconds: self._set_grace(s))
+            self._grace_actions[seconds] = action
+        self._grace_custom = self._grace_menu.addAction("Custom…")
+        self._grace_custom.setCheckable(True)
+        self._grace_custom.setActionGroup(self._grace_group)
+        self._grace_custom.triggered.connect(self._set_grace_custom)
         self._start_menu.aboutToShow.connect(lambda: self._show_agents(self._controller.status()))
 
         self._extend_menu = m.addMenu("Add time")
@@ -240,12 +275,19 @@ class Tray(QObject):
             action.setEnabled(status.agents_enabled and installed)
             if action.isChecked() != (key in status.watched):
                 _set_checked(action, key in status.watched)
+        self._grace_menu.setEnabled(status.agents_enabled)
+        preset = self._grace_actions.get(status.grace)
+        _set_checked(preset or self._grace_custom, True)
+        custom = "Custom…" if preset else f"Custom: {describe_grace(status.grace)}…"
+        self._grace_custom.setText(custom)
 
     def _save_settings(self, status: Status) -> None:
         """Keep the settings in step, including changes made over D-Bus. While a
         timer runs, status.mode is the timer's, which need not be the chosen one."""
         if not status.active and self._settings.mode is not status.mode:
             self._settings.mode = status.mode
+        if self._settings.agent_grace != status.grace:
+            self._settings.agent_grace = status.grace
         if self._settings.agents_enabled != status.agents_enabled:
             self._settings.agents_enabled = status.agents_enabled
         for key in self._agent_actions:
@@ -321,6 +363,26 @@ class Tray(QObject):
 
     def _set_agents_enabled(self, value: bool) -> None:
         self._guard(lambda: self._controller.set_agents_enabled(value))
+
+    def _set_grace(self, seconds: float) -> None:
+        self._guard(lambda: self._controller.set_grace(seconds))
+
+    def _set_grace_custom(self) -> None:
+        text, ok = QInputDialog.getText(
+            None,
+            "Keep awake after agents stop",
+            "How long (for example 30s, 10m, 1h, or 0 for no extra time):",
+        )
+        if ok and text.strip():
+            try:
+                seconds = 0.0 if text.strip() == "0" else parse_duration(text)
+                if seconds is None:
+                    raise ValueError("this needs a length, not 'forever'")
+                self._set_grace(seconds)
+                return
+            except ValueError as e:
+                self._error(str(e))
+        self.update(self._controller.status())
 
     def _set_watched(self, key: str, value: bool) -> None:
         self._guard(lambda: self._controller.set_watched(key, value))

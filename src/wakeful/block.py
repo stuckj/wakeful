@@ -121,6 +121,15 @@ def describe_duration(seconds: float | None) -> str:
     return f"{minutes} minute" + ("s" if minutes > 1 else "")
 
 
+def describe_grace(seconds: float) -> str:
+    """'no extra time', '30 seconds', '1 minute', '1 h 30 min'."""
+    if seconds <= 0:
+        return "no extra time"
+    if seconds < 60 or seconds % 60:
+        return f"{round(seconds)} seconds"
+    return describe_duration(seconds)
+
+
 _UNTIL_OFF = ("forever", "indefinite", "until-off", "untiloff", "off", "inf")
 _UNITS = {"h": 3600, "m": 60, "s": 1}
 # Durations travel over D-Bus as int32 seconds.

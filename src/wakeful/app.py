@@ -9,7 +9,7 @@ import signal
 import sys
 
 from . import __version__, control
-from .block import Mode, describe_remaining, parse_duration
+from .block import Mode, describe_grace, describe_remaining, parse_duration
 
 log = logging.getLogger("wakeful")
 
@@ -42,13 +42,24 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("status", help="show what is being kept awake")
     agents = sub.add_parser(
         "agents",
-        help="keep awake while coding agents work: 'on', 'off', or AGENT on|off",
+        help="keep awake while coding agents work: 'on', 'off', AGENT on|off, or grace DURATION",
         description="With 'on' or 'off', turn agentic checks on or off. With an agent "
         "(claude, codex, opencode) and 'on' or 'off', tick or untick that agent. "
-        "With nothing, show the state.",
+        "With 'grace' and a duration (e.g. 5m, or 0), set how long to keep awake after "
+        "agents stop working. With nothing, show the state.",
     )
     agents.add_argument("words", nargs="*", metavar="[AGENT] on|off")
     return p
+
+
+def parse_grace(text: str) -> int:
+    """A grace period: a duration as for start, or 0 for none."""
+    if text.strip() in ("0", "none"):
+        return 0
+    seconds = parse_duration(text)
+    if seconds is None:
+        raise ValueError("the grace period needs a length")
+    return int(seconds)
 
 
 def parse_switch(word: str) -> bool:
@@ -82,12 +93,14 @@ def run_command(args: argparse.Namespace) -> int:
             result = control.call("Start", int(seconds or 0), mode.value)
         elif args.command == "agents" and len(args.words) == 1:
             result = control.call("SetAgentsEnabled", parse_switch(args.words[0]))
+        elif args.command == "agents" and len(args.words) == 2 and args.words[0] == "grace":
+            result = control.call("SetAgentGrace", parse_grace(args.words[1]))
         elif args.command == "agents" and len(args.words) == 2:
             result = control.call(
                 "SetAgentWatched", args.words[0].lower(), parse_switch(args.words[1])
             )
         elif args.command == "agents" and args.words:
-            raise ValueError("usage: wakeful agents [on|off | AGENT on|off]")
+            raise ValueError("usage: wakeful agents [on|off | AGENT on|off | grace DURATION]")
         elif args.command == "extend":
             seconds = parse_duration(args.duration)
             if seconds is None:
@@ -131,7 +144,9 @@ def print_status(status: dict) -> None:
     if "watched" in status:
         ticked = ", ".join(status["watched"]) or "none"
         state = "on" if status.get("agents_enabled") else "off"
-        print(f"Agentic checks: {state} (ticked: {ticked})")
+        grace = status.get("grace")
+        after = "" if grace is None else f"; then {describe_grace(grace)}"
+        print(f"Agentic checks: {state} (ticked: {ticked}{after})")
     if status.get("agents_enabled") and not watching:
         print("Agentic checks are on, but no ticked agent is installed.")
     if sessions:

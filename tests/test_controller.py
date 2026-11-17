@@ -494,3 +494,49 @@ def test_shutdown_releases_agentic_holding(agents_env):
     c.set_agents_enabled(True)
     c.shutdown()
     assert inhibitor.held is None and not lid.engaged
+
+
+def test_the_grace_period_can_be_changed(agents_env):
+    c, inhibitor, _, clock, claude, _, _ = agents_env
+    c.set_agents_enabled(True)
+    c.set_grace(300)
+    assert c.status().grace == 300
+    claude.sessions = [session("a")]
+    c.tick()
+    claude.sessions = []
+    clock.t += 299
+    c.tick()
+    assert inhibitor.held is not None
+    clock.t += 1
+    c.tick()
+    assert inhibitor.held is None
+
+
+def test_no_grace_releases_as_soon_as_agents_stop(agents_env):
+    c, inhibitor, _, _, claude, _, _ = agents_env
+    c.set_agents_enabled(True)
+    c.set_grace(0)
+    claude.sessions = [session("a")]
+    c.tick()
+    claude.sessions = []
+    c.tick()
+    assert inhibitor.held is None
+
+
+def test_shortening_the_grace_releases_at_once_if_already_past_it(agents_env):
+    c, inhibitor, _, clock, claude, _, _ = agents_env
+    c.set_agents_enabled(True)
+    claude.sessions = [session("a")]
+    c.tick()
+    claude.sessions = []
+    clock.t += 30
+    c.tick()
+    assert inhibitor.held is not None
+    c.set_grace(10)
+    assert inhibitor.held is None
+
+
+def test_a_negative_grace_is_refused(agents_env):
+    c, *_ = agents_env
+    with pytest.raises(ValueError):
+        c.set_grace(-1)

@@ -129,6 +129,33 @@ def test_a_mode_chosen_over_d_bus_is_remembered_and_used_by_a_click(tray):
     assert controller.status().active and inhibitor.held[0] is Mode.SCREEN
 
 
+def test_the_grace_menu_is_greyed_with_the_agents_and_remembers_its_choice(tray):
+    make, _ = tray
+    t, controller, _ = make()
+    assert not t._grace_menu.isEnabled()
+    assert t._grace_actions[60].isChecked()  # the default
+    controller.set_agents_enabled(True)
+    assert t._grace_menu.isEnabled()
+    t._grace_actions[300].trigger()
+    assert controller.status().grace == 300 and Settings().agent_grace == 300
+    t.icon.hide()
+    t2, again, _ = make()
+    assert again.status().grace == 300 and t2._grace_actions[300].isChecked()
+
+
+def test_a_grace_not_in_the_presets_shows_on_custom(tray):
+    make, _ = tray
+    t, controller, _ = make()
+    controller.set_grace(45)
+    assert t._grace_custom.isChecked()
+    assert t._grace_custom.text() == "Custom: 45 seconds…"
+
+
+def test_grace_command_needs_a_length(capsys):
+    assert cli.main(["agents", "grace", "forever"]) == 2
+    assert "needs a length" in capsys.readouterr().err
+
+
 def test_agent_entries_are_greyed_while_agentic_checks_are_off(tray):
     make, _ = tray
     t, controller, _ = make()

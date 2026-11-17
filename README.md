@@ -143,7 +143,7 @@ While agentic checks are on, Wakeful keeps the computer awake while any ticked a
 
 An agent counts as working while it is running a turn: thinking, running a tool or shell, or running a sub-agent. A session sitting at its prompt does not.
 
-While the computer is kept awake, the menu has an *Agents working (N)* submenu listing each working session by agent and name; `wakeful status` lists them too. When the agents are the only reason, the battery applet shows *Agents working:* followed by the names.
+While the computer is kept awake, the menu has an *Agents working (N)* submenu listing each working session by agent and name; `wakeful status` lists them too. When the agents are the only reason, the battery applet shows *Agents working:* followed by the names, and during the grace period after they stop, *agents stopped* and the time left, as do the tray and `wakeful status`.
 
 How each agent is read, every five seconds while it matters (agentic checks on, or a timer running):
 

@@ -20,12 +20,14 @@ from PyQt6.QtWidgets import QInputDialog, QMenu, QSystemTrayIcon
 from . import autostart
 from .agents import AgentSession
 from .block import (
+    MAX_DURATION,
     Block,
     Mode,
     describe_duration,
     describe_grace,
     describe_remaining,
     parse_duration,
+    parse_grace,
 )
 from .controller import AGENT_GRACE, Controller, Status
 
@@ -104,7 +106,7 @@ class Settings:
             seconds = float(self._s.value("agent_grace", AGENT_GRACE))
         except (TypeError, ValueError):
             return AGENT_GRACE
-        return seconds if seconds >= 0 else AGENT_GRACE
+        return seconds if 0 <= seconds <= MAX_DURATION else AGENT_GRACE
 
     @agent_grace.setter
     def agent_grace(self, seconds: float) -> None:
@@ -253,6 +255,9 @@ class Tray(QObject):
 
         if status.active:
             lines = [f"Wakeful: {describe_remaining(status.remaining)}", status.mode.label]
+        elif status.held and status.grace_left is not None:
+            stopped = f"agents stopped, {describe_remaining(status.grace_left)}"
+            lines = [f"Wakeful: {stopped}", status.mode.label]
         elif status.held:
             lines = ["Wakeful: agents working", status.mode.label]
         elif status.watching:
@@ -377,10 +382,7 @@ class Tray(QObject):
         )
         if ok and text.strip():
             try:
-                seconds = 0.0 if text.strip() == "0" else parse_duration(text)
-                if seconds is None:
-                    raise ValueError("this needs a length, not 'forever'")
-                self._set_grace(seconds)
+                self._set_grace(parse_grace(text))
                 return
             except ValueError as e:
                 self._error(str(e))

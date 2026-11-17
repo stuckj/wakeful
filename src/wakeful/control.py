@@ -34,6 +34,7 @@ def status_dict(status: Status) -> dict[str, Any]:
         "watched": list(status.watched),
         "watching": status.watching,
         "grace": round(status.grace),
+        "grace_left": None if status.grace_left is None else round(status.grace_left),
         "sessions": [
             {"agent": s.agent, "name": s.name, "doing": s.doing, "cwd": s.cwd, "pid": s.pid}
             for s in status.sessions

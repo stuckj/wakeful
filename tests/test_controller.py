@@ -540,3 +540,30 @@ def test_a_negative_grace_is_refused(agents_env):
     c, *_ = agents_env
     with pytest.raises(ValueError):
         c.set_grace(-1)
+
+
+def test_unticking_the_working_agent_drops_its_grace(agents_env):
+    c, inhibitor, _, _, claude, _, _ = agents_env
+    c.set_watched("codex", True)
+    c.set_grace(900)
+    c.set_agents_enabled(True)
+    claude.sessions = [session("a")]
+    c.tick()
+    c.set_watched("claude", False)
+    assert inhibitor.held is None
+
+
+def test_the_grace_left_is_shown_while_agents_hold_with_none_working(agents_env):
+    c, inhibitor, _, clock, claude, _, _ = agents_env
+    c.set_grace(300)
+    c.set_agents_enabled(True)
+    claude.sessions = [session("a")]
+    c.tick()
+    assert c.status().grace_left is None
+    claude.sessions = []
+    clock.t += 60
+    c.tick()
+    status = c.status()
+    assert status.grace_left == 240
+    assert status.text == "Keeping awake: agents stopped, 4 min left"
+    assert inhibitor.held[1] == "Keeping awake: agents stopped, 4 min left"

@@ -9,7 +9,7 @@ import signal
 import sys
 
 from . import __version__, control
-from .block import Mode, describe_grace, describe_remaining, parse_duration
+from .block import Mode, describe_grace, describe_remaining, parse_duration, parse_grace
 
 log = logging.getLogger("wakeful")
 
@@ -52,16 +52,6 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def parse_grace(text: str) -> int:
-    """A grace period: a duration as for start, or 0 for none."""
-    if text.strip() in ("0", "none"):
-        return 0
-    seconds = parse_duration(text)
-    if seconds is None:
-        raise ValueError("the grace period needs a length")
-    return int(seconds)
-
-
 def parse_switch(word: str) -> bool:
     w = word.lower()
     if w in ("on", "yes", "true", "1"):
@@ -91,10 +81,12 @@ def run_command(args: argparse.Namespace) -> int:
             seconds = parse_duration(args.duration)
             mode = Mode.SCREEN if args.screen else Mode.SLEEP
             result = control.call("Start", int(seconds or 0), mode.value)
+        elif args.command == "agents" and args.words and args.words[0].lower() == "grace":
+            if len(args.words) != 2:
+                raise ValueError("usage: wakeful agents grace DURATION (e.g. 5m, or 0)")
+            result = control.call("SetAgentGrace", int(parse_grace(args.words[1])))
         elif args.command == "agents" and len(args.words) == 1:
             result = control.call("SetAgentsEnabled", parse_switch(args.words[0]))
-        elif args.command == "agents" and len(args.words) == 2 and args.words[0] == "grace":
-            result = control.call("SetAgentGrace", parse_grace(args.words[1]))
         elif args.command == "agents" and len(args.words) == 2:
             result = control.call(
                 "SetAgentWatched", args.words[0].lower(), parse_switch(args.words[1])
@@ -131,6 +123,9 @@ def print_status(status: dict) -> None:
     sessions = status.get("sessions", [])
     if status["active"]:
         print(f"Keeping awake ({how}): {describe_remaining(status['remaining'])}")
+    elif watching and status.get("held") and status.get("grace_left") is not None:
+        left = describe_remaining(status["grace_left"])
+        print(f"Keeping awake ({how}): agents stopped, {left}.")
     elif watching and status.get("held"):
         print(f"Keeping awake ({how}) while agents are working.")
     elif watching:

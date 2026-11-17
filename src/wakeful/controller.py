@@ -55,7 +55,8 @@ class Status:
     """Seconds left; None when inactive or when the block has no end."""
     text: str
     """'Keeping awake: 47 min left', 'Keeping awake: agents working',
-    'Watching agents', or 'Not keeping awake'."""
+    'Keeping awake: agents stopped, 4 min left', 'Watching agents', or
+    'Not keeping awake'."""
     lid_ignored: bool
     """The lid action is set to "Do nothing" right now."""
     ignore_lid: bool
@@ -72,6 +73,8 @@ class Status:
     """Working sessions of the ticked agents, read while a block runs or while watching."""
     grace: float = AGENT_GRACE
     """Seconds agentic checks keep holding after the last working session."""
+    grace_left: float | None = None
+    """Seconds of grace left while agents hold with none working; else None."""
 
 
 NAMES_SHOWN = 3
@@ -81,9 +84,15 @@ def reason_text(remaining: float | None) -> str:
     return f"Keeping awake: {describe_remaining(remaining)}"
 
 
-def agents_reason_text(sessions: Sequence[AgentSession]) -> str:
-    if not sessions:
+def grace_text(left: float | None) -> str:
+    if left is None:
         return "Keeping awake: agents working"
+    return f"Keeping awake: agents stopped, {describe_remaining(left)}"
+
+
+def agents_reason_text(sessions: Sequence[AgentSession], left: float | None = None) -> str:
+    if not sessions:
+        return grace_text(left)
     names = [s.label for s in sessions[:NAMES_SHOWN]]
     if len(sessions) > NAMES_SHOWN:
         names.append(f"{len(sessions) - NAMES_SHOWN} more")
@@ -109,7 +118,8 @@ class Controller:
         self._agents_enabled = False
         self._watched = set(self._watchers)
         self._sessions: tuple[AgentSession, ...] = ()
-        self._seen_at: float | None = None
+        self._seen_at: dict[str, float] = {}
+        """When each agent was last seen working, while agentic checks were on."""
         self._grace = AGENT_GRACE
         self._held = False
         """Whether the last successful _apply() left the inhibition held."""
@@ -124,10 +134,11 @@ class Controller:
     def status(self) -> Status:
         block = self._session.block
         remaining = block.remaining(self._now()) if block else None
+        grace_left = self._grace_left() if self._held and not block and not self._sessions else None
         if block is not None:
             text = reason_text(remaining)
         elif self._held:
-            text = "Keeping awake: agents working"
+            text = grace_text(grace_left)
         elif self._watching():
             text = "Watching agents"
         else:
@@ -145,6 +156,7 @@ class Controller:
             watching=self._watching(),
             sessions=self._sessions,
             grace=self._grace,
+            grace_left=grace_left,
         )
 
     def agents(self) -> list[tuple[str, str, bool]]:
@@ -226,6 +238,7 @@ class Controller:
             self._watched.add(key)
         else:
             self._watched.discard(key)
+            self._seen_at.pop(key, None)
         self._refresh()
 
     def tick(self) -> None:
@@ -257,19 +270,34 @@ class Controller:
             return False
         if self._sessions:
             return True
-        return self._seen_at is not None and self._now() - self._seen_at < self._grace
+        return self._grace_left() is not None
+
+    def _grace_left(self) -> float | None:
+        """Seconds of grace left from the ticked agents last seen working, or None."""
+        left = [
+            self._grace - (self._now() - seen)
+            for key, seen in self._seen_at.items()
+            if key in self._watched and self._watchers[key].available()
+        ]
+        best = max(left, default=0.0)
+        return best if best > 0 else None
 
     def _poll(self) -> None:
         """Read the working sessions of the ticked agents, when anything needs them."""
         if self._session.block is None and not self._watching():
-            self._sessions, self._seen_at = (), None
+            self._sessions = ()
+            self._seen_at.clear()
             return
         found: list[AgentSession] = []
+        watching = self._watching()
         for key, watcher in self._watchers.items():
             if key not in self._watched or not watcher.available():
                 continue
             try:
-                found.extend(watcher.working())
+                sessions = watcher.working()
+                found.extend(sessions)
+                if sessions and watching:
+                    self._seen_at[key] = self._now()
             except Exception:
                 # Once with the traceback; again only after it has worked.
                 if key in self._failing:
@@ -280,8 +308,6 @@ class Controller:
             else:
                 self._failing.discard(key)
         self._sessions = tuple(found)
-        if self._sessions and self._watching():
-            self._seen_at = self._now()
 
     def _refresh(self) -> None:
         self._poll()
@@ -302,7 +328,7 @@ class Controller:
         elif block is not None:
             self._inhibitor.hold(block.mode, reason_text(block.remaining(self._now())))
         else:
-            self._inhibitor.hold(self._mode, agents_reason_text(self._sessions))
+            self._inhibitor.hold(self._mode, agents_reason_text(self._sessions, self._grace_left()))
         if wanted != self._held:
             self._held = wanted
             self._sync_lid()

@@ -188,3 +188,27 @@ def test_status_from_a_tray_without_the_agent_fields(monkeypatch, capsys):
 def test_agents_command_needs_on_or_off(capsys):
     assert cli.main(["agents", "claude", "maybe"]) == 2
     assert "expected 'on' or 'off'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("saved", ["inf", "1e12", "-5", "nonsense"])
+def test_an_out_of_range_saved_grace_falls_back_to_the_default(tray, saved):
+    make, _ = tray
+    Settings()._s.setValue("agent_grace", saved)
+    _, controller, _ = make()
+    assert controller.status().grace == 60
+
+
+def test_grace_command_needs_a_value(capsys):
+    assert cli.main(["agents", "grace"]) == 2
+    assert "usage: wakeful agents grace" in capsys.readouterr().err
+
+
+def test_grace_command_is_case_insensitive(monkeypatch):
+    calls = []
+    status = {"active": False, "mode": "sleep", "remaining": None, "lid_ignored": False}
+    monkeypatch.setattr("PyQt6.QtCore.QCoreApplication", lambda *args: None)
+    monkeypatch.setattr(
+        cli.control, "call", lambda *args: calls.append(args) or {"ok": True, "status": status}
+    )
+    assert cli.main(["agents", "GRACE", "0s"]) == 0
+    assert calls == [("SetAgentGrace", 0)]

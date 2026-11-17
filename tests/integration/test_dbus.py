@@ -508,7 +508,7 @@ def test_a_session_whose_process_is_gone_is_dropped(stub, app, claude_session):
     # Still held through the grace period, without the gone session's name: up
     # to one tick to notice, then the old reason is retired after PowerDevil's delay.
     wait_for(
-        lambda: reasons(stub) == ["Keeping awake: agents working"],
+        lambda: reasons(stub) == ["Keeping awake: agents stopped, 1 min left"],
         timeout=20,
         what="the gone session to be dropped from the reason",
     )

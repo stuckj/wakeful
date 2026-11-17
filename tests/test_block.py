@@ -174,7 +174,7 @@ def test_describe_grace():
     assert describe_grace(300) == "5 minutes"
 
 
-@pytest.mark.parametrize("text", ["0", "00", "0s", "0m", "0h", "0m0s", "none", "NONE"])
+@pytest.mark.parametrize("text", ["0", "00", "0s", "0m", "0h", "0m0s", "none", "NONE", "off"])
 def test_parse_grace_accepts_any_spelling_of_zero(text):
     assert parse_grace(text) == 0
 

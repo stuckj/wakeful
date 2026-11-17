@@ -450,7 +450,11 @@ class Tray(QObject):
     def _ended(self, block: Block, why: str) -> None:
         if why != "expired" or not self._settings.notify:
             return
-        if self._controller.status().held:
+        status = self._controller.status()
+        if status.held and status.grace_left is not None:
+            left = describe_remaining(status.grace_left)
+            text = f"Time is up. Still keeping awake: agents stopped, {left}."
+        elif status.held:
             text = "Time is up. Still keeping awake while agents are working."
         else:
             text = "Time is up. The computer can sleep again."

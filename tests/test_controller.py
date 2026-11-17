@@ -567,3 +567,16 @@ def test_the_grace_left_is_shown_while_agents_hold_with_none_working(agents_env)
     assert status.grace_left == 240
     assert status.text == "Keeping awake: agents stopped, 4 min left"
     assert inhibitor.held[1] == "Keeping awake: agents stopped, 4 min left"
+
+
+def test_status_says_agents_stopped_until_the_tick_after_the_grace(agents_env):
+    c, _, _, clock, claude, _, _ = agents_env
+    c.set_agents_enabled(True)
+    claude.sessions = [session("a")]
+    c.tick()
+    claude.sessions = []
+    c.tick()
+    clock.t += AGENT_GRACE + 2  # past the grace, before the next tick
+    status = c.status()
+    assert status.held and status.grace_left == 0
+    assert status.text.startswith("Keeping awake: agents stopped")

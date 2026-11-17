@@ -134,7 +134,10 @@ class Controller:
     def status(self) -> Status:
         block = self._session.block
         remaining = block.remaining(self._now()) if block else None
-        grace_left = self._grace_left() if self._held and not block and not self._sessions else None
+        grace_left = None
+        if self._held and not block and not self._sessions:
+            # 0 once past the grace, until the next tick releases.
+            grace_left = self._grace_left() or 0.0
         if block is not None:
             text = reason_text(remaining)
         elif self._held:

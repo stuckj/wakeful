@@ -258,3 +258,18 @@ def test_available_follows_the_database(tmp_path):
     assert not w.available()
     (tmp_path / "opencode.db").touch()
     assert w.available()
+
+
+def test_a_failed_read_is_retried_on_the_next_tick(tmp_path, watcher):
+    w = watcher([("assistant", False, 5)])
+    query, failures = w._busy_sessions, [1]
+
+    def flaky(db, since):
+        if failures:
+            failures.pop()
+            raise sqlite3.OperationalError("database is locked")
+        return query(db, since)
+
+    w._busy_sessions = flaky
+    assert w.working() == ()
+    assert len(w.working()) == 1

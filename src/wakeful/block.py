@@ -139,9 +139,9 @@ MAX_DURATION = 2**31 - 1
 
 def parse_grace(text: str) -> float:
     """A grace period: a duration as for parse_duration, or zero ('0', '0s',
-    'none') for no extra time."""
+    'none', 'off') for no extra time."""
     t = text.strip().lower().replace(" ", "")
-    if t == "none" or re.fullmatch(r"(0+[hms]?)+", t):
+    if t in ("none", "off") or re.fullmatch(r"(0+[hms]?)+", t):
         return 0.0
     seconds = parse_duration(text)
     if seconds is None:

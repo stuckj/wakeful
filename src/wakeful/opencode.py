@@ -168,8 +168,11 @@ class OpencodeWatcher:
         dbs = self.databases()
         key = (since, *(_stamp(Path(f"{db}{suffix}")) for db in dbs for suffix in ("", "-wal")))
         if key != self._key or self._now() - self._queried_at >= REQUERY_AFTER:
-            self._busy = [row for db in dbs for row in self._readable(db, since)]
-            self._key, self._queried_at = key, self._now()
+            reads = [self._readable(db, since) for db in dbs]
+            self._busy = [row for rows in reads if rows is not None for row in rows]
+            # A failed read is not cached: the next tick reads again.
+            self._key = key if None not in reads else ()
+            self._queried_at = self._now()
         found = []
         for _id, title, directory, step, last_write in self._busy:
             if last_write is not None and self._now() - last_write >= SILENT_FOR:
@@ -187,14 +190,16 @@ class OpencodeWatcher:
                 found.append(AgentSession(self.label, owner.pid, name, "working", directory))
         return tuple(found)
 
-    def _readable(self, db: Path, since: float) -> list[tuple[str, str, str, float, float | None]]:
-        """_busy_sessions of db, or none if it cannot be read, so one bad file
+    def _readable(
+        self, db: Path, since: float
+    ) -> list[tuple[str, str, str, float, float | None]] | None:
+        """_busy_sessions of db, or None if it cannot be read, so one bad file
         does not hide the sessions of the others."""
         try:
             return self._busy_sessions(db, since)
         except (sqlite3.Error, OSError) as e:
             log.debug("could not read %s: %s", db, e)
-            return []
+            return None
 
     def _processes(self) -> list[Process]:
         """The opencode processes, walking /proc only every RESCAN_AFTER seconds or

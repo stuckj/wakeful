@@ -277,7 +277,9 @@ class Tray(QObject):
                 _set_checked(action, key in status.watched)
         self._grace_menu.setEnabled(status.agents_enabled)
         preset = self._grace_actions.get(status.grace)
-        _set_checked(preset or self._grace_custom, True)
+        # Not _set_checked: the exclusive group unchecks the others on the
+        # signal it would block. These act on triggered, not toggled.
+        (preset or self._grace_custom).setChecked(True)
         custom = "Custom…" if preset else f"Custom: {describe_grace(status.grace)}…"
         self._grace_custom.setText(custom)
 

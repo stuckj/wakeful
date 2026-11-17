@@ -141,13 +141,15 @@ def test_the_grace_menu_is_greyed_with_the_agents_and_remembers_its_choice(tray)
     t.icon.hide()
     t2, again, _ = make()
     assert again.status().grace == 300 and t2._grace_actions[300].isChecked()
+    checked = [a for a in t2._grace_menu.actions() if a.isChecked()]
+    assert checked == [t2._grace_actions[300]]
 
 
 def test_a_grace_not_in_the_presets_shows_on_custom(tray):
     make, _ = tray
     t, controller, _ = make()
     controller.set_grace(45)
-    assert t._grace_custom.isChecked()
+    assert [a for a in t._grace_menu.actions() if a.isChecked()] == [t._grace_custom]
     assert t._grace_custom.text() == "Custom: 45 seconds…"
 
 

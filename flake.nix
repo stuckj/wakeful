@@ -17,7 +17,7 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
         # Version is updated by the release workflow before tagging
-        version = "0.1.0";
+        version = "0.2.0";
         wakeful = pkgs.callPackage ./nix/package.nix {
           inherit version;
           src = self;

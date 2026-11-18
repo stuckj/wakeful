@@ -4,8 +4,10 @@ from wakeful.block import (
     Mode,
     Session,
     describe_duration,
+    describe_grace,
     describe_remaining,
     parse_duration,
+    parse_grace,
 )
 
 
@@ -162,3 +164,23 @@ def test_parse_duration(text, seconds):
 def test_parse_duration_rejects(text):
     with pytest.raises(ValueError):
         parse_duration(text)
+
+
+def test_describe_grace():
+    assert describe_grace(0) == "no extra time"
+    assert describe_grace(30) == "30 seconds"
+    assert describe_grace(90) == "90 seconds"
+    assert describe_grace(60) == "1 minute"
+    assert describe_grace(300) == "5 minutes"
+
+
+@pytest.mark.parametrize("text", ["0", "00", "0s", "0m", "0h", "0m0s", "none", "NONE", "off"])
+def test_parse_grace_accepts_any_spelling_of_zero(text):
+    assert parse_grace(text) == 0
+
+
+def test_parse_grace_takes_durations_and_refuses_forever():
+    assert parse_grace("90s") == 90
+    assert parse_grace("5") == 300
+    with pytest.raises(ValueError):
+        parse_grace("forever")

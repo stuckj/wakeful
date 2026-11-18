@@ -2,19 +2,31 @@
 
 Qt-free. The tray and the D-Bus control interface call in; a periodic tick()
 reaps an expired block and keeps the inhibition's reason text current.
+
+Two things can keep the computer awake, independently: the timed block the user
+started, and, with agentic checks on, any watched coding agent that is working
+(and for a grace period, AGENT_GRACE by default, after the last one was seen). One inhibition serves
+both, in the block's mode while there is a block and in the chosen mode
+otherwise. The lid follows the inhibition. Agentic checks stay on while nothing
+is working; they then hold nothing and the session's own idle timers apply.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
 from . import clock
-from .block import Block, Mode, Session, describe_remaining
+from .agents import AgentSession, AgentWatcher
+from .block import MAX_DURATION, Block, Mode, Session, describe_remaining
 
 log = logging.getLogger(__name__)
+
+AGENT_GRACE = 60.0
+"""Seconds agentic checks keep holding after the last working session, by
+default, so a pause between two turns does not let the computer sleep."""
 
 
 class Inhibitor(Protocol):
@@ -36,19 +48,55 @@ class LidGuard(Protocol):
 @dataclass(frozen=True)
 class Status:
     active: bool
-    mode: Mode | None
+    """A timed block (or one that lasts until turned off) is running."""
+    mode: Mode
+    """The block's mode, or the chosen mode when there is no block."""
     remaining: float | None
     """Seconds left; None when inactive or when the block has no end."""
     text: str
-    """'Keeping awake: 47 min left', or 'Not keeping awake'."""
+    """'Keeping awake: 47 min left', 'Keeping awake: agents working',
+    'Keeping awake: agents stopped, 4 min left', 'Watching agents', or
+    'Not keeping awake'."""
     lid_ignored: bool
     """The lid action is set to "Do nothing" right now."""
     ignore_lid: bool
-    """The option is on: the lid will be ignored whenever a block runs."""
+    """The option is on: the lid will be ignored whenever the inhibition is held."""
+    held: bool = False
+    """The inhibition is held, for the block or for working agents."""
+    agents_enabled: bool = False
+    """The agentic checks master switch is on."""
+    watched: tuple[str, ...] = ()
+    """Keys of the agents ticked, whether or not the master switch is on."""
+    watching: bool = False
+    """Agentic checks are on and at least one ticked agent is installed."""
+    sessions: tuple[AgentSession, ...] = ()
+    """Working sessions of the ticked agents, read while a block runs or while watching."""
+    grace: float = AGENT_GRACE
+    """Seconds agentic checks keep holding after the last working session."""
+    grace_left: float | None = None
+    """Seconds of grace left while agents hold with none working; else None."""
+
+
+NAMES_SHOWN = 3
 
 
 def reason_text(remaining: float | None) -> str:
     return f"Keeping awake: {describe_remaining(remaining)}"
+
+
+def grace_text(left: float | None) -> str:
+    if left is None:
+        return "Keeping awake: agents working"
+    return f"Keeping awake: agents stopped, {describe_remaining(left)}"
+
+
+def agents_reason_text(sessions: Sequence[AgentSession], left: float | None = None) -> str:
+    if not sessions:
+        return grace_text(left)
+    names = [s.label for s in sessions[:NAMES_SHOWN]]
+    if len(sessions) > NAMES_SHOWN:
+        names.append(f"{len(sessions) - NAMES_SHOWN} more")
+    return f"Agents working: {', '.join(names)}"
 
 
 class Controller:
@@ -57,13 +105,26 @@ class Controller:
         inhibitor: Inhibitor,
         lid: LidGuard | None = None,
         now: Callable[[], float] = clock.now,
+        agents: Iterable[AgentWatcher] = (),
     ) -> None:
         self._inhibitor = inhibitor
         self._lid = lid
         self._now = now
+        self._watchers = {w.key: w for w in agents}
         self._session = Session()
+        self._mode = Mode.SLEEP
         self._ignore_lid = False
         self._lid_engaged = False
+        self._agents_enabled = False
+        self._watched = set(self._watchers)
+        self._sessions: tuple[AgentSession, ...] = ()
+        self._seen_at: dict[str, float] = {}
+        """When each agent was last seen working, while agentic checks were on."""
+        self._grace = AGENT_GRACE
+        self._held = False
+        """Whether the last successful _apply() left the inhibition held."""
+        self._failing: set[str] = set()
+        """Agents whose watcher raised on its last read."""
         self.on_changed: Callable[[Status], None] = lambda status: None
         self.on_ended: Callable[[Block, str], None] = lambda block, why: None
         """Called with the block and 'expired' or 'stopped'."""
@@ -72,17 +133,38 @@ class Controller:
 
     def status(self) -> Status:
         block = self._session.block
-        if block is None:
-            return Status(False, None, None, "Not keeping awake", False, self._ignore_lid)
-        remaining = block.remaining(self._now())
+        remaining = block.remaining(self._now()) if block else None
+        grace_left = None
+        if self._held and not block and not self._sessions:
+            # 0 once past the grace, until the next tick releases.
+            grace_left = self._grace_left() or 0.0
+        if block is not None:
+            text = reason_text(remaining)
+        elif self._held:
+            text = grace_text(grace_left)
+        elif self._watching():
+            text = "Watching agents"
+        else:
+            text = "Not keeping awake"
         return Status(
-            True,
-            block.mode,
-            remaining,
-            reason_text(remaining),
-            self._lid_engaged,
-            self._ignore_lid,
+            active=block is not None,
+            mode=block.mode if block else self._mode,
+            remaining=remaining,
+            text=text,
+            lid_ignored=self._lid_engaged,
+            ignore_lid=self._ignore_lid,
+            held=self._held,
+            agents_enabled=self._agents_enabled,
+            watched=tuple(k for k in self._watchers if k in self._watched),
+            watching=self._watching(),
+            sessions=self._sessions,
+            grace=self._grace,
+            grace_left=grace_left,
         )
+
+    def agents(self) -> list[tuple[str, str, bool]]:
+        """(key, label, installed) for every agent Wakeful knows."""
+        return [(w.key, w.label, w.available()) for w in self._watchers.values()]
 
     @property
     def ignore_lid(self) -> bool:
@@ -105,16 +187,15 @@ class Controller:
         """
         previous = self._session.block
         self._session.start(duration, mode, self._now())
+        self._poll()
         try:
             self._apply()
         except Exception:
             self._session.block = previous
-            if previous is None:
+            if not self._held:
                 self._inhibitor.release()
-            self._sync_lid()
             self._changed()
             raise
-        self._sync_lid()
         self._changed()
 
     def extend(self, duration: float) -> None:
@@ -123,27 +204,116 @@ class Controller:
         self._changed()
 
     def set_mode(self, mode: Mode) -> None:
+        """Choose the mode for the block, if any, and for agentic holds."""
         block = self._session.block
-        if block is None or block.mode is mode:
-            return
-        self._session.set_mode(mode)
+        previous = self._mode
+        self._mode = mode
+        if block is not None:
+            self._session.set_mode(mode)
         try:
             self._apply()
         except Exception:
-            self._session.set_mode(block.mode)
+            self._mode = previous
+            if block is not None:
+                self._session.set_mode(block.mode)
             raise
         self._changed()
 
     def stop(self) -> None:
+        """End the block. Agentic checks carry on."""
         self._end("stopped")
 
+    def set_agents_enabled(self, value: bool) -> None:
+        self._agents_enabled = value
+        self._refresh()
+
+    def set_grace(self, seconds: float) -> None:
+        """How long agentic checks keep holding after the last working session."""
+        if not 0 <= seconds <= MAX_DURATION:
+            raise ValueError("the grace period must be between 0 and 2**31-1 seconds")
+        self._grace = float(seconds)
+        self._refresh()
+
+    def set_watched(self, key: str, value: bool) -> None:
+        if key not in self._watchers:
+            raise ValueError(f"unknown agent {key!r}; known: {', '.join(self._watchers)}")
+        if value:
+            self._watched.add(key)
+        else:
+            self._watched.discard(key)
+            self._seen_at.pop(key, None)
+        self._refresh()
+
     def tick(self) -> None:
-        """Reap an expired block, or refresh the reason text of a running one."""
-        if self._session.block is None:
+        """Reap an expired block, and refresh the sessions and the inhibition."""
+        block = self._session.block
+        if block is None and not self._watching() and not self._held:
             return
-        if self._session.block.expired(self._now()):
+        if block is not None and block.expired(self._now()):
             self._end("expired")
             return
+        self._refresh()
+
+    def shutdown(self) -> None:
+        """Release everything before exit. The block is not reported as ended."""
+        self._session.cancel()
+        self._sessions, self._held = (), False
+        self._inhibitor.release()
+        self._sync_lid()
+
+    # -- internals ---------------------------------------------------------
+
+    def _watching(self) -> bool:
+        return self._agents_enabled and any(self._watchers[k].available() for k in self._watched)
+
+    def _wanted(self) -> bool:
+        if self._session.block is not None:
+            return True
+        if not self._watching():
+            return False
+        if self._sessions:
+            return True
+        return self._grace_left() is not None
+
+    def _grace_left(self) -> float | None:
+        """Seconds of grace left from the ticked agents last seen working, or None."""
+        left = [
+            self._grace - (self._now() - seen)
+            for key, seen in self._seen_at.items()
+            if key in self._watched and self._watchers[key].available()
+        ]
+        best = max(left, default=0.0)
+        return best if best > 0 else None
+
+    def _poll(self) -> None:
+        """Read the working sessions of the ticked agents, when anything needs them."""
+        if self._session.block is None and not self._watching():
+            self._sessions = ()
+            self._seen_at.clear()
+            return
+        found: list[AgentSession] = []
+        watching = self._watching()
+        for key, watcher in self._watchers.items():
+            if key not in self._watched or not watcher.available():
+                continue
+            try:
+                sessions = watcher.working()
+                found.extend(sessions)
+                if sessions and watching:
+                    self._seen_at[key] = self._now()
+            except Exception:
+                # Once with the traceback; again only after it has worked.
+                if key in self._failing:
+                    log.debug("could not read the %s sessions", watcher.label, exc_info=True)
+                else:
+                    log.exception("could not read the %s sessions", watcher.label)
+                    self._failing.add(key)
+            else:
+                self._failing.discard(key)
+        self._sessions = tuple(found)
+
+    def _refresh(self) -> None:
+        self._poll()
         # Retried on every tick: hold() also re-takes an inhibition that was
         # lost, for example to a PowerDevil restart.
         try:
@@ -152,23 +322,31 @@ class Controller:
             log.warning("could not refresh the inhibition: %s", e)
         self._changed()
 
-    def shutdown(self) -> None:
-        """Release everything before exit. The block is not reported as ended."""
-        self._session.cancel()
-        self._inhibitor.release()
-        self._sync_lid()
-
-    # -- internals ---------------------------------------------------------
-
     def _apply(self) -> None:
+        """Hold what is wanted right now, or release it, and move the lid with it."""
+        wanted = self._wanted()
         block = self._session.block
-        assert block is not None
-        self._inhibitor.hold(block.mode, reason_text(block.remaining(self._now())))
+        if not wanted:
+            self._inhibitor.release()
+        elif block is not None:
+            self._inhibitor.hold(block.mode, reason_text(block.remaining(self._now())))
+        else:
+            self._inhibitor.hold(self._mode, agents_reason_text(self._sessions, self._grace_left()))
+        if wanted != self._held:
+            self._held = wanted
+            self._sync_lid()
 
     def _end(self, why: str) -> None:
         ended = self._session.cancel()
-        self._inhibitor.release()
-        self._sync_lid()
+        self._poll()
+        try:
+            self._apply()
+        except Exception as e:
+            # Holding for agents failed; the block's own inhibition must still go.
+            log.warning("could not hold for working agents: %s", e)
+            self._inhibitor.release()
+            self._held = False
+            self._sync_lid()
         if ended is not None:
             self.on_ended(ended, why)
         self._changed()
@@ -176,7 +354,7 @@ class Controller:
     def _sync_lid(self) -> None:
         if self._lid is None:
             return
-        want = self._ignore_lid and self._session.active
+        want = self._ignore_lid and self._held
         if want == self._lid_engaged:
             return
         try:

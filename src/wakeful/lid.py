@@ -1,4 +1,4 @@
-"""Optionally set the lid-close action to "Do nothing" while a block runs.
+"""Optionally set the lid-close action to "Do nothing" while a block keeps the computer awake.
 
 Inhibitions cannot stop the lid: PowerDevil treats closing it as an explicit
 request and bypasses every policy. The only lever is the LidAction setting in

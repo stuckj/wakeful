@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import enum
 import math
+import re
 from dataclasses import dataclass
 
 
@@ -121,10 +122,31 @@ def describe_duration(seconds: float | None) -> str:
     return f"{minutes} minute" + ("s" if minutes > 1 else "")
 
 
+def describe_grace(seconds: float) -> str:
+    """'no extra time', '30 seconds', '1 minute', '1 h 30 min'."""
+    if seconds <= 0:
+        return "no extra time"
+    if seconds < 60 or seconds % 60:
+        return f"{round(seconds)} seconds"
+    return describe_duration(seconds)
+
+
 _UNTIL_OFF = ("forever", "indefinite", "until-off", "untiloff", "off", "inf")
 _UNITS = {"h": 3600, "m": 60, "s": 1}
 # Durations travel over D-Bus as int32 seconds.
 MAX_DURATION = 2**31 - 1
+
+
+def parse_grace(text: str) -> float:
+    """A grace period: a duration as for parse_duration, or zero ('0', '0s',
+    'none', 'off') for no extra time."""
+    t = text.strip().lower().replace(" ", "")
+    if t in ("none", "off") or re.fullmatch(r"(0+[hms]?)+", t):
+        return 0.0
+    seconds = parse_duration(text)
+    if seconds is None:
+        raise ValueError("the grace period needs a length, not 'forever'")
+    return seconds
 
 
 def parse_duration(text: str) -> float | None:

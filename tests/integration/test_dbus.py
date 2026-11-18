@@ -97,6 +97,9 @@ def env(tmp_path):
     e.update(
         XDG_CONFIG_HOME=str(tmp_path / "config"),
         XDG_STATE_HOME=str(tmp_path / "state"),
+        CLAUDE_CONFIG_DIR=str(tmp_path / "claude"),
+        CODEX_HOME=str(tmp_path / "codex"),
+        XDG_DATA_HOME=str(tmp_path / "data"),
         QT_QPA_PLATFORM="offscreen",
     )
     return e
@@ -420,3 +423,128 @@ def test_lid_restored_at_startup_from_a_leftover_journal(stub, env):
         assert [lid_value(env, p) for p in ("AC", "Battery", "LowBattery")] == ["1", "unset", "2"]
     finally:
         a.stop()
+
+
+# -- agentic checks -------------------------------------------------------
+
+
+@pytest.fixture
+def claude_session(env):
+    """A live process standing in for Claude Code, and a writer for its session file."""
+    proc = subprocess.Popen(["sleep", "300"])
+    sessions = Path(env["CLAUDE_CONFIG_DIR"]) / "sessions"
+    sessions.mkdir(parents=True)
+    stat = Path(f"/proc/{proc.pid}/stat").read_text()
+    started = stat[stat.rfind(")") + 2 :].split()[19]
+
+    def write(status: str) -> None:
+        data = {"pid": proc.pid, "procStart": started, "status": status, "name": "fix the tests"}
+        tmp = sessions / f"{proc.pid}.json.tmp"
+        tmp.write_text(json.dumps(data))
+        tmp.replace(sessions / f"{proc.pid}.json")
+
+    yield proc, write
+    proc.kill()
+    proc.wait()
+
+
+def reasons(stub) -> list[str]:
+    return sorted(h["why"] for h in stub.held())
+
+
+def test_agents_report_when_no_ticked_agent_is_installed(stub, app):
+    a = app("--no-tray")
+    r = a.cli("agents", "on")
+    assert r.returncode == 0, r.stderr
+    assert "no ticked agent is installed" in r.stdout
+    assert stub.held() == []
+
+
+def test_an_unknown_agent_is_refused(stub, app):
+    a = app("--no-tray")
+    r = a.cli("agents", "cursor", "on")
+    assert r.returncode == 1
+    assert "unknown agent" in r.stderr
+
+
+def test_agentic_checks_hold_only_while_claude_works(stub, app, claude_session):
+    _, write = claude_session
+    write("idle")
+    a = app("--no-tray")
+    assert a.cli("agents", "claude", "on").returncode == 0
+    r = a.cli("agents", "on")
+    assert r.returncode == 0, r.stderr
+    assert "Watching agents" in r.stdout
+    assert stub.held() == []
+
+    write("shell")
+    wait_for(
+        lambda: reasons(stub) == ["Agents working: fix the tests"],
+        what="the inhibition to be taken once the session works",
+    )
+    out = a.cli("status").stdout
+    assert "while agents are working" in out
+    assert "Claude Code: fix the tests (running a shell)" in out
+
+
+def test_agentic_checks_follow_the_chosen_mode(stub, app, claude_session):
+    _, write = claude_session
+    write("busy")
+    a = app("--no-tray")
+    assert a.cli("agents", "claude", "on").returncode == 0
+    assert call_app(stub, "SetMode", "s", "screen")["ok"]
+    assert a.cli("agents", "on").returncode == 0
+    assert sorted(h["kind"] for h in stub.held()) == ["pm", "ss"]
+
+
+def test_a_session_whose_process_is_gone_is_dropped(stub, app, claude_session):
+    proc, write = claude_session
+    write("busy")
+    a = app("--no-tray")
+    assert a.cli("agents", "claude", "on").returncode == 0
+    assert a.cli("agents", "on").returncode == 0
+    proc.kill()
+    proc.wait()
+    # Still held through the grace period, without the gone session's name: up
+    # to one tick to notice, then the old reason is retired after PowerDevil's delay.
+    wait_for(
+        lambda: reasons(stub) == ["Keeping awake: agents stopped, 1 min left"],
+        timeout=20,
+        what="the gone session to be dropped from the reason",
+    )
+    assert "fix the tests" not in a.cli("status").stdout
+
+
+def test_timer_ending_hands_over_to_working_agents(stub, app, claude_session):
+    _, write = claude_session
+    write("busy")
+    a = app("--no-tray")
+    assert a.cli("agents", "claude", "on").returncode == 0
+    assert a.cli("agents", "on").returncode == 0
+    r = a.cli("start", "1h")
+    assert "Also keeping awake while agents are working." in r.stdout
+    wait_for(
+        lambda: reasons(stub) == ["Keeping awake: 1 h left"],
+        what="the timer's inhibition to replace the agents'",
+    )
+    assert a.cli("stop").returncode == 0
+    assert "Agents working: fix the tests" in reasons(stub)
+
+
+def test_tray_restores_agentic_checks_from_its_settings(stub, app, env, claude_session):
+    _, write = claude_session
+    write("busy")
+    conf = Path(env["XDG_CONFIG_HOME"]) / "wakeful" / "wakeful.conf"
+    conf.parent.mkdir(parents=True)
+    conf.write_text("[General]\nagents_enabled=true\nwatch_claude=true\n")
+    a = app()
+    wait_for(lambda: stub.held(), what="the tray to hold for the working session")
+    assert "Claude Code: fix the tests (working)" in a.cli("status").stdout
+
+
+def test_agents_grace_is_set_and_shown(stub, app):
+    a = app("--no-tray")
+    r = a.cli("agents", "grace", "2m")
+    assert r.returncode == 0, r.stderr
+    assert "then 2 minutes" in r.stdout
+    assert "then no extra time" in a.cli("agents", "grace", "0").stdout

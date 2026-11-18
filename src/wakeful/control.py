@@ -24,11 +24,21 @@ INTERFACE = "io.github.stuckj.Wakeful"
 def status_dict(status: Status) -> dict[str, Any]:
     return {
         "active": status.active,
-        "mode": status.mode.value if status.mode else None,
+        "mode": status.mode.value,
         "remaining": None if status.remaining is None else round(status.remaining),
         "text": status.text,
         "lid_ignored": status.lid_ignored,
         "ignore_lid": status.ignore_lid,
+        "held": status.held,
+        "agents_enabled": status.agents_enabled,
+        "watched": list(status.watched),
+        "watching": status.watching,
+        "grace": round(status.grace),
+        "grace_left": None if status.grace_left is None else round(status.grace_left),
+        "sessions": [
+            {"agent": s.agent, "name": s.name, "doing": s.doing, "cwd": s.cwd, "pid": s.pid}
+            for s in status.sessions
+        ],
     }
 
 
@@ -64,6 +74,21 @@ class ControlAdaptor(QDBusAbstractAdaptor):
     @pyqtSlot(bool, result=str)
     def SetIgnoreLid(self, value: bool) -> str:
         return self._answer(lambda: setattr(self._controller, "ignore_lid", value))
+
+    @pyqtSlot(bool, result=str)
+    def SetAgentsEnabled(self, value: bool) -> str:
+        """Turn agentic checks on or off; which agents are ticked is kept."""
+        return self._answer(lambda: self._controller.set_agents_enabled(value))
+
+    @pyqtSlot(str, bool, result=str)
+    def SetAgentWatched(self, agent: str, value: bool) -> str:
+        """Tick or untick one agent, e.g. 'claude'."""
+        return self._answer(lambda: self._controller.set_watched(agent, value))
+
+    @pyqtSlot(int, result=str)
+    def SetAgentGrace(self, seconds: int) -> str:
+        """How long agentic checks keep holding after agents stop working."""
+        return self._answer(lambda: self._controller.set_grace(seconds))
 
     @pyqtSlot(result=str)
     def Stop(self) -> str:

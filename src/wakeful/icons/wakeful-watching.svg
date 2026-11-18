@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">
+  <defs>
+    <clipPath id="below-lid">
+      <rect x="0" y="12" width="22" height="10"/>
+    </clipPath>
+  </defs>
+  <path d="M2.5 12 Q11 21 19.5 12" fill="none" stroke="#f67400" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M2.5 12 L19.5 12" fill="none" stroke="#f67400" stroke-width="1.8" stroke-linecap="round"/>
+  <circle cx="11" cy="12" r="3.2" fill="#f67400" clip-path="url(#below-lid)"/>
+</svg>

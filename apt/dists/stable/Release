@@ -5,9 +5,9 @@ Codename: stable
 Architectures: amd64 arm64
 Components: main
 Description: wakeful (current version; see the apt-history release for older versions)
-Date: Mon, 09 Nov 2026 02:33:24 +0000
+Date: Wed, 18 Nov 2026 04:20:25 +0000
 SHA256:
- 5113f069ebb7dc140fe5592c85ad92b8d0a27abff06bfb12650de84eadef2e86 821 main/binary-amd64/Packages
- 4c851c27432a1a12765c731a5d41af5b6ff3daafe1ffce1ff0ee003f7ec9459b 564 main/binary-amd64/Packages.gz
- 5113f069ebb7dc140fe5592c85ad92b8d0a27abff06bfb12650de84eadef2e86 821 main/binary-arm64/Packages
- 4c851c27432a1a12765c731a5d41af5b6ff3daafe1ffce1ff0ee003f7ec9459b 564 main/binary-arm64/Packages.gz
+ f1bef215201ace33ee2f405eab072dfd9d9bf651dc973467e4f7f57fe6607983 822 main/binary-amd64/Packages
+ 7325d96720cbaceac47ff64fb852e4874218f3cc3e11db049c2d79de86af7a60 566 main/binary-amd64/Packages.gz
+ f1bef215201ace33ee2f405eab072dfd9d9bf651dc973467e4f7f57fe6607983 822 main/binary-arm64/Packages
+ 7325d96720cbaceac47ff64fb852e4874218f3cc3e11db049c2d79de86af7a60 566 main/binary-arm64/Packages.gz

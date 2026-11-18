@@ -1,15 +1,15 @@
 Package: wakeful
-Version: 0.1.0
+Version: 0.2.0
 Architecture: all
 Maintainer: stuckj <stuckj@users.noreply.github.com>
-Installed-Size: 70
+Installed-Size: 127
 Depends: python3 (>= 3.11), python3-pyqt6, qt6-svg-plugins
 Recommends: libkf6config-bin
-Filename: pool/main/wakeful_0.1.0_all.deb
-Size: 25252
-MD5sum: 3c3589a8da45ece4812cbea14e5e9b44
-SHA1: 9cce87a5e6760ac1960b91718deada32d11b8407
-SHA256: cd073f2f42f4a461a3bc33df1ce3cac6656940a7021ec527018cb9398aba1837
+Filename: pool/main/wakeful_0.2.0_all.deb
+Size: 42618
+MD5sum: 2779c34d2e1b8603d822059b0e74f94d
+SHA1: 51c467366a329ec76e57caae22c02e46969c00ff
+SHA256: 6d143434dcc0abbe83eaf36eb02f36f5af240624ecb013f3467a43f3262595a2
 Section: utils
 Priority: optional
 Homepage: https://github.com/stuckj/wakeful

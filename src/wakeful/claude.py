@@ -11,6 +11,10 @@ not a documented interface; the fields read here are:
   cwd         the session's working directory.
   procStart   field 22 of /proc/<pid>/stat for the process that wrote the file.
   pidDomain   "linux:<machine-id>:pid:[<pid namespace inode>]".
+  parkedJobId set on an interactive session whose conversation was moved into
+              a background job, until the client starts or resumes another
+              one. The parked file's status stops updating; the job reports
+              the conversation from its own file.
 
 A file outlives a process that crashed, so a session counts only while its PID
 is alive with the same start time, in this machine's PID namespace.
@@ -84,6 +88,8 @@ class ClaudeWatcher:
             # Claude Code may be rewriting it; the next poll reads it again.
             return None
         if not isinstance(data, dict) or str(data.get("status")) not in WORKING:
+            return None
+        if isinstance(data.get("parkedJobId"), str):
             return None
         pid = data.get("pid")
         if not isinstance(pid, int) or pid <= 0:

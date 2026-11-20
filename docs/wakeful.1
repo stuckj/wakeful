@@ -114,6 +114,8 @@ itself; none of them is a documented interface:
 \fI$CLAUDE_CONFIG_DIR/sessions/*.json\fR (default \fI~/.claude/sessions\fR):
 working while a session is busy or still running a shell after its turn. A
 session waiting for an answer does not count, nor one whose process has gone.
+A conversation moved to the background counts through the background
+session's file, not the one it was moved from.
 .TP
 .B Codex
 \fI$CODEX_HOME/sessions/**/rollout\-*.jsonl\fR (default \fI~/.codex\fR):

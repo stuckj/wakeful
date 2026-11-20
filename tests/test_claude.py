@@ -41,6 +41,19 @@ def test_busy_and_shell_count_idle_and_waiting_do_not(tmp_path):
     assert [s.doing for s in w.working()] == ["working", "running a shell"]
 
 
+def test_session_moved_to_a_background_job_counts_only_through_the_job(tmp_path):
+    write(tmp_path, 100, kind="interactive", status="busy", parkedJobId="a99992c3")
+    write(tmp_path, 200, kind="bg", status="idle", jobId="a99992c3")
+    assert names(watcher(tmp_path)) == []
+    write(tmp_path, 200, kind="bg", status="busy", jobId="a99992c3")
+    assert names(watcher(tmp_path)) == ["session 200"]
+
+
+def test_unparked_session_counts_again(tmp_path):
+    write(tmp_path, 100, kind="interactive", status="busy", parkedJobId=None)
+    assert names(watcher(tmp_path)) == ["session 100"]
+
+
 def test_file_left_by_a_dead_process_is_ignored(tmp_path):
     write(tmp_path, 100)
     assert names(watcher(tmp_path, {})) == []

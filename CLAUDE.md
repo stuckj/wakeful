@@ -41,6 +41,9 @@ None of these is a documented interface. Each watcher module's docstring documen
   or `waiting`; it reads `shell` after a turn ends while a background shell still runs, and
   `busy` while an in-process subagent runs. `procStart` is field 22 of `/proc/<pid>/stat`;
   `pidDomain` is `linux:<machine-id>:pid:[<pid namespace>]`.
+  An interactive session moved to the background gets `parkedJobId` (the job's `jobId`) and its
+  `status` freezes; Claude Code clears the field when that client starts or resumes another
+  conversation, and its own session lists skip records that have it.
 - **Codex**, checked by running codex-cli 0.169.0 on Linux, and in its source
   (`codex-rs/rollout/src/policy.rs`, `writer_lock.rs`). Every turn writes `task_started` then
   `task_complete` (or `turn_aborted`) to its rollout; the first line is `session_meta` with the
